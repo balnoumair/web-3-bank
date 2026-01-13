@@ -2,6 +2,7 @@ import { MetaProvider, Title } from "@solidjs/meta";
 import { Router } from "@solidjs/router";
 import { FileRoutes } from "@solidjs/start/router";
 import { Suspense } from "solid-js";
+import BankLayout from "~/components/BankLayout";
 import "./app.css";
 
 export default function App() {
@@ -9,8 +10,10 @@ export default function App() {
     <Router
       root={props => (
         <MetaProvider>
-          <Title>SolidStart - with Vitest</Title>
-          <Suspense>{props.children}</Suspense>
+          <Title>Web3Bank - Simplified Stablecoin Banking</Title>
+          <BankLayout>
+            <Suspense>{props.children}</Suspense>
+          </BankLayout>
         </MetaProvider>
       )}
     >
