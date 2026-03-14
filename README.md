@@ -1,97 +1,119 @@
-# Solid-Turborepo Starter
+# web3Bank
 
-A modern Turborepo starter for building SolidJS applications with a complete development setup. This starter comes equipped with the pnpm package manager, Vinxi Bundler for optimized builds, Tailwind CSS v4 for styling and ESLint for code quality.
+> A Web3-native banking experience built on stablecoins, passkey authentication, and cross-chain load balancing.
 
 ---
 
-## Table of Contents
+## Vision
 
-- [Overview](#overview)
-- [Getting Started](#getting-started)
-- [What's Inside?](#whats-inside)
-- [Build & Develop](#build--develop)
-- [Remote Caching](#remote-caching)
-- [Useful Links](#useful-links)
-- [License](#license)
+web3Bank delivers a traditional **banking UX** powered entirely by on-chain infrastructure. Users interact with a familiar interface — balances, transfers, statements — without needing to understand wallets, gas fees, or chain selection. Under the hood:
 
-## Overview
+- **Authentication** is passkey-only — no seed phrases, no passwords.
+- **Funds** are held in a **custom stablecoin** designed for resilience across chains.
+- **Chain routing** is load-balanced transparently: if one chain degrades, user funds and transactions are automatically routed elsewhere — users never notice.
+- **Fee optimisation** is handled by bank contracts that batch and move funds to minimise on-chain costs.
 
-This starter project leverages Turborepo to manage a monorepo structure that combines a SolidJS application with shared component libraries and configuration packages. It provides a robust setup for modern web development:
+---
 
-## Getting Started
+## Architecture
 
-To bootstrap your new turborepo using this starter, simply run:
+```mermaid
+flowchart TB
+    subgraph "Client Layer"
+        UI["Bank Client<br/>SolidJS · Passkey Auth"]
+    end
 
-```sh
-npx create-turbo@latest
+    subgraph "Backend Layer"
+        BFF["BFF / API Gateway"]
+        AUTH["Auth Service<br/>Passkey"]
+    end
+
+    subgraph "Chain Abstraction Layer"
+        LB["Load Balancer Engine<br/>(cre-route-orchestrator)"]
+        CCIP["Chainlink CCIP<br/>Cross-Chain Messaging"]
+    end
+
+    subgraph "On-Chain Layer"
+        SC_A["Stablecoin Contract<br/>Chain A"]
+        SC_B["Stablecoin Contract<br/>Chain B"]
+        SC_N["Stablecoin Contract<br/>Chain N"]
+        BANK["Bank Contract<br/>Fee Optimisation · Fund Movement"]
+    end
+
+    UI --> BFF
+    BFF --> AUTH
+    BFF --> LB
+
+    LB -->|"selects best chain(s)"| CCIP
+    LB -->|"direct if single chain"| BANK
+
+    CCIP --> SC_A
+    CCIP --> SC_B
+    CCIP --> SC_N
+
+    BANK --> SC_A
+    BANK --> SC_B
+    BANK --> SC_N
 ```
 
-## What's inside?
+---
 
-This Turborepo includes the following packages/apps:
+## Core Components
 
-### Apps and Packages
+| Component | Description |
+|-----------|-------------|
+| **Bank Client** (`apps/bank-client`) | SolidJS front-end providing the banking UX. Passkey-based login. |
+| **BFF / API Gateway** (`apps/bff`) | Backend-for-frontend mediating between the client and on-chain services. |
+| **Auth Service** | Passkey registration and assertion. |
+| **Load Balancer Engine** | Scores and ranks supported chains in real-time (fees, latency, reliability, liquidity). See `cre-route-orchestrator`. |
+| **Custom Stablecoin** | ERC-20 stablecoin deployed across multiple chains with cross-chain load balancing. |
+| **Bank Contract** | Smart contracts managing fund movements, batching operations, and coordinating cross-chain transfers via CCIP. |
 
-- `docs`: a [Solid Start](https://start.solidjs.com/) app
-- `web`: a [Solid Start](https://start.solidjs.com/) app
-- `@repo/ui`: a stub Solid component library shared by both `solid` applications
-- `@repo/eslint-config`: `eslint` configurations
-- `@repo/tailwind-config`: [Tailwind](https://tailwindcss.com/) v4 configurations
-- `vinxi`: [Vinxi](https://vinxi.vercel.app/) Bundler\*\* for efficient bundling.
+---
 
-## Build & Develop
+## Cross-Chain Strategy
 
-### Build
+| Concern | Approach |
+|---------|----------|
+| **Messaging** | Chainlink CCIP for cross-chain token transfers and contract calls |
+| **Chain Selection** | cre-route-orchestrator scoring engine (fee, latency, reliability, liquidity) |
+| **Failover** | If primary chain degrades, traffic is re-routed transparently |
+| **User Impact** | Zero — chain selection is invisible to the end user |
 
-To build all apps and packages, run the following command:
+---
 
-```
-cd with-solid
-pnpm run build
-```
-
-### Develop
-
-To develop all apps and packages, run the following command:
-
-```
-cd with-solid
-pnpm run dev
-```
-
-### Remote Caching
-
-> [!TIP]
-> Vercel Remote Cache is free for all plans. Get started today at [vercel.com](https://vercel.com/signup?/signup?utm_source=remote-cache-sdk&utm_campaign=free_remote_cache).
-
-Turborepo can use a technique known as [Remote Caching](https://turborepo.com/docs/core-concepts/remote-caching) to share cache artifacts across machines, enabling you to share build caches with your team and CI/CD pipelines.
-
-By default, Turborepo will cache locally. To enable Remote Caching you will need an account with Vercel. If you don't have an account you can [create one](https://vercel.com/signup?utm_source=turborepo-examples), then enter the following commands:
+## Monorepo Structure
 
 ```
-cd with-solid
-npx turbo login
+web3Bank/
+├── apps/
+│   ├── bank-client/          # SolidJS front-end
+│   └── bff/                  # Backend-for-frontend
+├── packages/
+│   ├── ui/                   # Shared UI component library
+│   ├── eslint-config/        # Shared ESLint configuration
+│   └── tailwind-config/      # Shared Tailwind v4 configuration
+├── architecture/             # Decision records for each topic
+└── [future packages]
+    ├── contracts/            # Stablecoin + Bank smart contracts
+    ├── shared-types/         # Shared TypeScript types / Zod schemas
+    └── config/               # Runtime configuration
 ```
 
-This will authenticate the Turborepo CLI with your [Vercel account](https://vercel.com/docs/concepts/personal-accounts/overview).
+---
 
-Next, you can link your Turborepo to your Remote Cache by running the following command from the root of your Turborepo:
+## Open Questions & Decisions
 
-```
-npx turbo link
-```
+> Tracked here as the project evolves. Decision records live in `architecture/`.
 
-## Useful Links
+- [ ] Stablecoin peg mechanism
+- [ ] Chain set for launch
+- [ ] Passkey + account abstraction approach
+- [ ] Cross-chain mint/burn vs lock/unlock
+- [ ] Fee model (paymaster / relayer / bundled)
+- [ ] cre-route-orchestrator integration strategy
+- [ ] Regulatory considerations
 
-Learn more about the power of Turborepo:
+---
 
-- [Tasks](https://turborepo.com/docs/crafting-your-repository/running-tasks)
-- [Caching](https://turborepo.com/docs/crafting-your-repository/caching)
-- [Remote Caching](https://turborepo.com/docs/core-concepts/remote-caching)
-- [Filtering](https://turborepo.com/docs/crafting-your-repository/running-tasks#using-filters)
-- [Configuration Options](https://turborepo.com/docs/reference/configuration)
-- [CLI Usage](https://turborepo.com/docs/reference/command-line-reference)
-
-## License
-
-This project is licensed under the MIT License.
+*This document evolves as the project grows. Last updated: 2026-03-13.*
