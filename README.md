@@ -8,10 +8,10 @@
 
 web3Bank delivers a traditional **banking UX** powered entirely by on-chain infrastructure. Users interact with a familiar interface — balances, transfers, statements — without needing to understand wallets, gas fees, or chain selection. Under the hood:
 
-- **Authentication** is passkey-only — no seed phrases, no passwords.
-- **Funds** are held in a **custom stablecoin** designed for resilience across chains.
-- **Chain routing** is load-balanced transparently: if one chain degrades, user funds and transactions are automatically routed elsewhere — users never notice.
-- **Fee optimisation** is handled by bank contracts that batch and move funds to minimise on-chain costs.
+- **Authentication** is passkey-only — no seed phrases, no passwords. Uses Tempo's native EIP-2718 passkey transaction type.
+- **Funds** are held in **SyncUSD**, a custom stablecoin backed 1:1 by USDC, deployed across multiple chains.
+- **Chain routing** is load-balanced transparently via the CRE Route Orchestrator. If one chain degrades, funds and transactions are automatically routed elsewhere — users never notice.
+- **Transfers** are instant across chains via pool-to-pool hot path relay. Background CCIP rebalancing keeps pools funded.
 
 ---
 
@@ -20,54 +20,63 @@ web3Bank delivers a traditional **banking UX** powered entirely by on-chain infr
 ```mermaid
 flowchart TB
     subgraph "Client Layer"
-        UI["Bank Client<br/>SolidJS · Passkey Auth"]
+        UI["Bank Client<br/>SolidJS · wagmi/viem · Tempo Passkeys"]
     end
 
-    subgraph "Backend Layer"
-        BFF["BFF / API Gateway"]
-        AUTH["Auth Service<br/>Passkey"]
+    subgraph "API Layer"
+        BFF["BFF<br/>Bun · GraphQL Proxy<br/>No business logic, no DB"]
     end
 
-    subgraph "Chain Abstraction Layer"
-        LB["Load Balancer Engine<br/>(cre-route-orchestrator)"]
-        CCIP["Chainlink CCIP<br/>Cross-Chain Messaging"]
+    subgraph "Backend Services"
+        USER["User Service<br/>Profiles · Credentials"]
+        TREASURY["Treasury Service<br/>Rust · Hot Path Relay · Cold Path<br/>Watcher · Pool Management"]
+    end
+
+    subgraph "Chain Intelligence"
+        CRE["CRE Orchestrator<br/>TypeScript/Bun · Chainlink CRE SDK<br/>Chain Scoring · Failover"]
     end
 
     subgraph "On-Chain Layer"
-        SC_A["Stablecoin Contract<br/>Chain A"]
-        SC_B["Stablecoin Contract<br/>Chain B"]
-        SC_N["Stablecoin Contract<br/>Chain N"]
-        BANK["Bank Contract<br/>Fee Optimisation · Fund Movement"]
+        RR["RouteReceiver.sol<br/>Chain Scores · Activation State"]
+        BANK_T["Bank Contract<br/>Tempo (TIP-20)"]
+        BANK_B["Bank Contract<br/>Base (ERC-20)"]
+        BANK_N["Bank Contract<br/>Chain N (ERC-20)"]
+        SYNC["SyncUSD<br/>Multi-chain Stablecoin"]
+        CCIP["Chainlink CCIP<br/>Burn & Mint"]
     end
 
-    UI --> BFF
-    BFF --> AUTH
-    BFF --> LB
+    UI -->|GraphQL| BFF
+    BFF -->|Internal HTTP| USER
+    BFF -->|Internal HTTP| TREASURY
 
-    LB -->|"selects best chain(s)"| CCIP
-    LB -->|"direct if single chain"| BANK
+    CRE -->|Publishes scores| RR
+    TREASURY -->|Reads chain health| RR
+    TREASURY -->|Hot path relay| BANK_T
+    TREASURY -->|Hot path relay| BANK_B
+    TREASURY -->|Cold path rebalance| CCIP
 
-    CCIP --> SC_A
-    CCIP --> SC_B
-    CCIP --> SC_N
-
-    BANK --> SC_A
-    BANK --> SC_B
-    BANK --> SC_N
+    BANK_T --- SYNC
+    BANK_B --- SYNC
+    BANK_N --- SYNC
+    CCIP --> BANK_T
+    CCIP --> BANK_B
+    CCIP --> BANK_N
 ```
 
 ---
 
 ## Core Components
 
-| Component | Description |
-|-----------|-------------|
-| **Bank Client** (`apps/bank-client`) | SolidJS front-end providing the banking UX. Passkey-based login. |
-| **BFF / API Gateway** (`apps/bff`) | Backend-for-frontend mediating between the client and on-chain services. |
-| **Auth Service** | Passkey registration and assertion. |
-| **Load Balancer Engine** | Scores and ranks supported chains in real-time (fees, latency, reliability, liquidity). See `cre-route-orchestrator`. |
-| **Custom Stablecoin** | ERC-20 stablecoin deployed across multiple chains with cross-chain load balancing. |
-| **Bank Contract** | Smart contracts managing fund movements, batching operations, and coordinating cross-chain transfers via CCIP. |
+| Component | Description | Runtime |
+|-----------|-------------|---------|
+| **Bank Client** (`apps/bank-client`) | SolidJS frontend. Passkey auth via wagmi/viem, Tempo native EIP-2718 transactions. | SolidStart |
+| **BFF** | Thin GraphQL proxy. Forwards requests to backend services, manages JWT sessions. No database, no business logic. | Bun |
+| **User Service** | User profiles, passkey credential-to-address mapping, account state. | TBD |
+| **Treasury Service** | Hot path relay, cold path CCIP rebalancing, pool depth management, watcher (fraud detection). | Rust |
+| **CRE Orchestrator** | Scores chains on fee, latency, reliability, liquidity. Publishes rankings to `RouteReceiver.sol`. Separate repo, already ~80% complete. | TypeScript/Bun |
+| **SyncUSD** | Custom stablecoin backed 1:1 by USDC. TIP-20 on Tempo, ERC-20 on other chains. CCIP burn-and-mint for cross-chain movement. | Solidity |
+| **Bank Contract** | Liquidity pool per chain. Deposit/withdraw (USDC ↔ SyncUSD), hot path transfers. UUPS upgradeable, pausable. | Solidity |
+| **RouteReceiver** | On-chain registry of chain health scores and activation states. Written by CRE, read by Treasury. | Solidity |
 
 ---
 
@@ -75,10 +84,12 @@ flowchart TB
 
 | Concern | Approach |
 |---------|----------|
-| **Messaging** | Chainlink CCIP for cross-chain token transfers and contract calls |
-| **Chain Selection** | cre-route-orchestrator scoring engine (fee, latency, reliability, liquidity) |
-| **Failover** | If primary chain degrades, traffic is re-routed transparently |
-| **User Impact** | Zero — chain selection is invisible to the end user |
+| **Hot Path (Instant Transfers)** | Pool-to-pool relay via Treasury Service. No CCIP delay. |
+| **Cold Path (Rebalancing)** | Batched CCIP burn-and-mint when pools become imbalanced. |
+| **Chain Scoring** | CRE Orchestrator: Fee (35%), Latency (30%), Reliability (25%), Liquidity (10%) |
+| **Failover** | CRE drops degraded chains from active set. Treasury stops routing to them. |
+| **Security** | Watcher module cross-verifies every hot path release. Pauses contracts on mismatch. |
+| **User Impact** | Zero — chain selection is invisible to the end user. |
 
 ---
 
@@ -87,33 +98,38 @@ flowchart TB
 ```
 web3Bank/
 ├── apps/
-│   ├── bank-client/          # SolidJS front-end
-│   └── bff/                  # Backend-for-frontend
+│   └── bank-client/          # SolidJS frontend
 ├── packages/
 │   ├── ui/                   # Shared UI component library
 │   ├── eslint-config/        # Shared ESLint configuration
 │   └── tailwind-config/      # Shared Tailwind v4 configuration
-├── architecture/             # Decision records for each topic
-└── [future packages]
-    ├── contracts/            # Stablecoin + Bank smart contracts
-    ├── shared-types/         # Shared TypeScript types / Zod schemas
-    └── config/               # Runtime configuration
+├── architecture/             # Decision records & service architecture
+│   ├── authentication.md     # Passkey auth (decided)
+│   ├── technology.md         # Tech stack
+│   ├── smart-contracts.md    # SyncUSD, Bank Contract, RouteReceiver
+│   ├── bank-infrastructure.md # Hot/cold path, pool model
+│   └── services.md           # Service boundaries & integration
+├── tasks/                    # Implementation task breakdowns
+└── [future]
+    ├── contracts/            # Solidity: SyncUSD, Bank Contract (Foundry)
+    └── services/
+        ├── bff/              # GraphQL proxy (Bun)
+        ├── treasury/         # Hot path, cold path, watcher (Rust)
+        └── user-service/     # Profiles, credentials
 ```
 
 ---
 
-## Open Questions & Decisions
+## Open Items (Deferred)
 
-> Tracked here as the project evolves. Decision records live in `architecture/`.
+> Decision records live in `architecture/`. These items are tracked but not blocking testnet.
 
-- [ ] Stablecoin peg mechanism
-- [ ] Chain set for launch
-- [ ] Passkey + account abstraction approach
-- [ ] Cross-chain mint/burn vs lock/unlock
-- [ ] Fee model (paymaster / relayer / bundled)
-- [ ] cre-route-orchestrator integration strategy
-- [ ] Regulatory considerations
+- [ ] Account recovery strategy (social recovery, backup passkeys, time-delayed)
+- [ ] Revenue/fee model (spread, transfer fees, yield on reserves)
+- [ ] Regulatory considerations (KYC/AML — deferred since testnet only)
+- [ ] Observability stack (metrics, alerting, dashboards)
+- [ ] User Service runtime decision (Rust or Bun)
 
 ---
 
-*This document evolves as the project grows. Last updated: 2026-03-13.*
+*This document evolves as the project grows. Last updated: 2026-03-15.*
