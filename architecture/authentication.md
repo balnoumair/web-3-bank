@@ -32,6 +32,7 @@ sequenceDiagram
     participant User
     participant Browser
     participant BFF
+    participant User Service
     participant Tempo Network
 
     User->>Browser: Clicks "Sign Up"
@@ -41,8 +42,10 @@ sequenceDiagram
     Note over Browser: Secure Enclave generates<br>P-256 Keypair (Private/Public)
     Browser->>Browser: Derives Tempo Address from Public Key
     Browser->>BFF: POST /api/users (Address, CredentialID)
-    BFF->>BFF: Stores User Profile
-    Note over BFF, Tempo Network: The account now exists off-chain.<br>It will be deployed on-chain on the first transaction.
+    BFF->>User Service: Forward create user request
+    User Service->>User Service: Stores User Profile
+    Note over User Service, Tempo Network: The account now exists off-chain.<br>It will be deployed on-chain on the first transaction.
+    User Service-->>BFF: User created
     BFF-->>Browser: Registration Success
     Browser-->>User: Directed to Dashboard (Balance: 0)
 ```
@@ -56,14 +59,19 @@ sequenceDiagram
     participant User
     participant Browser
     participant BFF
+    participant User Service
+    participant Treasury Service
 
     User->>Browser: Clicks "Log In"
     Browser->>Browser: Calls `navigator.credentials.get()`
     Browser-->>User: Prompts device biometric (FaceID)
     User->>Browser: Biometric verification
     Browser->>BFF: Sends GET request with verified Address
-    BFF->>BFF: Fetches User Profile & Bank Balance
-    BFF-->>Browser: Returns User Data
+    BFF->>User Service: Fetch user profile
+    User Service-->>BFF: User Profile
+    BFF->>Treasury Service: Fetch bank balance
+    Treasury Service-->>BFF: Balance data
+    BFF-->>Browser: Returns combined User Data
     Browser-->>User: Directed to Dashboard
 ```
 

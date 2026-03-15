@@ -43,13 +43,54 @@ The Bank Contract acts as a non-custodial gateway and liquidity provider for `Sy
 
 #### `transferHotPath(address to, uint256 amount, uint256 destinationChainId)`
 - **Action:** Used strictly for instantaneous cross-chain transfers between users.
-- **Execution:** 
-  1. The Bank Contract pulls `amount` of `SyncUSD` from the sender's wallet in the source chain and locks it in its local liquidity pool.
-  2. The BFF instantly detects this event in real-time.
-  3. The BFF communicates to the destination chain's Bank Contract.
-  4. The destination Bank Contract releases `amount` of `SyncUSD` from its own liquidity pool to the receiver's wallet.
+- **Execution:**
+  1. The Bank Contract pulls `amount` of `SyncUSD` from the sender's wallet on the source chain and locks it in its local liquidity pool. Emits a `HotPathInitiated` event.
+  2. The **Treasury Service** (Rust, off-chain) listens for this event, validates the destination chain is active (reads `RouteReceiver.sol`), checks destination pool depth, and submits a release transaction.
+  3. The destination Bank Contract releases `amount` of `SyncUSD` from its own liquidity pool to the receiver's wallet. Only callers with `RELAYER_ROLE` can execute this release.
+  4. The Treasury Service's **watcher module** independently verifies the release matches the source event.
 
-*(Note: If Both users are on the same chain, they just execute a standard `transfer()` of the `SyncUSD` token. No Bank Contract interaction is required).*
+#### `releaseHotPath(address to, uint256 amount, bytes32 sourceEventHash)`
+- **Action:** Called by the Treasury relayer on the destination chain to complete a hot path transfer.
+- **Execution:** Releases `amount` of `SyncUSD` from the local pool to `to`. Restricted to `RELAYER_ROLE`. Emits a `HotPathReleased` event with `sourceEventHash` for cross-chain verification.
+
+*(Note: If both users are on the same chain, they just execute a standard `transfer()` of the `SyncUSD` token. No Bank Contract interaction is required).*
+
+## 3. Contract Patterns
+
+### Access Control
+All contracts use OpenZeppelin `AccessControl` with the following roles:
+- `MINTER_ROLE`: Bank Contract and CCIP Token Pool (can mint/burn SyncUSD)
+- `RELAYER_ROLE`: Treasury Service relayer address (can execute `releaseHotPath`)
+- `ADMIN_ROLE`: Protected by a **Timelock** contract for role changes, upgrades, and parameter updates
+- `PAUSER_ROLE`: Treasury Service watcher (can pause contracts in emergencies)
+
+### Upgradeability
+All contracts use the **UUPS (Universal Upgradeable Proxy Standard)** pattern:
+- Upgrade logic lives in the implementation contract and can be removed once contracts are stable
+- All upgrades gated behind `ADMIN_ROLE` + Timelock (minimum delay before execution)
+
+### Emergency Controls
+All contracts inherit OpenZeppelin `Pausable`:
+- When paused, all state-mutating functions (`deposit`, `withdraw`, `transferHotPath`, `releaseHotPath`) are disabled
+- The Treasury Service watcher triggers pause on detected mismatches between source events and destination releases
+- Unpause requires `ADMIN_ROLE` + Timelock
+
+### Fee Interface (Reserved)
+Fee logic is deferred but the interface is reserved for future implementation:
+- `deposit` and `withdraw` accept a fee parameter (currently set to 0)
+- `transferHotPath` reserves a fee field in the event payload
+- Fee collection address configurable by `ADMIN_ROLE`
+
+## 4. Existing Contracts
+
+### RouteReceiver.sol (CRE Orchestrator)
+The `RouteReceiver` contract is already deployed on Base Sepolia as part of the CRE Route Orchestrator project. It receives chain health scores and activation states from the CRE system:
+- `publishRoute()`: Writes recommended chain + score
+- `publishActivationState()`: Publishes active/inactive chain sets
+- `getLatestRoute()`: Read by the Treasury Service to determine routing
+- Replay-protected via `_publishedRuns` mapping
+
+The Treasury Service reads from this contract to make hot path routing decisions. See `architecture/services.md` for the full integration model.
 
 ---
 *Last updated: March 2026*

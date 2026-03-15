@@ -1,6 +1,6 @@
 # Bank Infrastructure & Cross-Chain Routing
 
-> **Status:** 🚧 WIP — Core concepts defined, technical implementation details pending.
+> **Status:** 🚧 WIP — Core concepts defined. Service boundaries and hot path authorization model decided.
 
 ## Vision
 
@@ -22,10 +22,22 @@ Users do not choose which chain they transact on. The system handles routing beh
 - **Cold Path (Asynchronous Rebalancing):** The treasury maintains pools of `SyncUSD` on all active chains. When a pool becomes imbalanced, the backend system triggers a batched, asynchronous CCIP burn-and-mint operation to move liquidity between chains. 
 
 ### 3. The Role of the CRE Load Balancer
-The `cre-route-orchestrator` does not route individual A→B transfers. Instead, it manages the global health of the bank:
-1. **Dynamic Reserve Distribution:** It scores chains and decides the optimal ratio of reserves to hold on each chain.
-2. **Rebalancing Triggers:** It tells the treasury when to execute bulk CCIP moves to top up depleted pools.
-3. **Failover:** If a chain becomes degraded, CRE instantly removes it from the active rotation. Incoming deposits are routed elsewhere, and withdrawals are serviced from healthy pools.
+The `cre-route-orchestrator` (an existing TypeScript/Bun service built on the Chainlink CRE SDK) does not route individual A→B transfers. Instead, it manages the global health of the bank by publishing chain scores and activation states to the `RouteReceiver.sol` smart contract on-chain:
+1. **Dynamic Reserve Distribution:** It scores chains (Fee 35%, Latency 30%, Reliability 25%, Liquidity 10%) and publishes the optimal ranking to `RouteReceiver.sol`.
+2. **Activation State:** Chains scoring above the activation threshold (default 0.7) are marked as active. The Treasury Service reads this on-chain state to decide where to route funds.
+3. **Failover:** If a chain becomes degraded, CRE drops its score and publishes an updated activation state. The Treasury Service reads the updated state and stops routing to that chain.
+
+### 4. The Role of the Treasury Service
+The Treasury Service (Rust) is the operational backbone that moves funds. It reads chain health from `RouteReceiver.sol` and acts accordingly:
+1. **Hot Path Relay:** Listens for `HotPathInitiated` events on source chains, validates the destination chain is active (via `RouteReceiver.sol`), checks pool depth, and submits release transactions on the destination chain.
+2. **Cold Path Rebalancing:** Executes batched CCIP burn-and-mint operations when pools become imbalanced.
+3. **Watcher:** An independent module that cross-references every hot path release against the source chain event. On mismatch, it pauses the affected Bank Contract.
+4. **Pool Depth Management:** Monitors pool depths across all chains and rejects hot path transfers when the destination pool is insufficient.
+
+### 5. Pool Depth & Liquidity Safeguards
+- **Minimum Pool Ratio:** Each chain must hold a configurable minimum percentage of the total SyncUSD supply.
+- **Hot Path Rejection:** If the destination pool's available liquidity is below the transfer amount, the hot path transfer is rejected. The user receives an error and can retry when liquidity is available.
+- **Rebalancing Triggers:** When a pool drops below its target threshold, the Treasury Service initiates a cold path CCIP rebalance proactively — before the pool is fully depleted.
 
 ## Concrete User Flows & Examples
 
@@ -51,10 +63,11 @@ web3Bank uses the exact same model, but built entirely on-chain using smart cont
 **Scenario:** Bob (on Tempo) sends $1,000 to Charlie (wallet connected to Base).
 Because CCIP takes 5–20 minutes, we **never** use it in the hot path for user transfers.
 1. Bob initiates the transfer of $1,000 from the UI.
-2. **Tempo Bank Contract:** Takes 1,000 `SyncUSD` from Bob and holds it in the Tempo pool.
-3. The system instantly detects the intent and messages the Base chain.
-4. **Base Bank Contract:** Immediately releases 1,000 `SyncUSD` from its *local liquidity pool* to Charlie's wallet on Base.
-5. **UX:** Charlie receives the funds instantly. Bob's balance updates instantly. No one waits for CCIP. 
+2. **Tempo Bank Contract:** Takes 1,000 `SyncUSD` from Bob and holds it in the Tempo pool. Emits a `HotPathInitiated` event.
+3. **Treasury Service (Relayer):** Listens for the event, reads `RouteReceiver.sol` to confirm Base is an active chain, verifies the Base pool has sufficient depth, and submits a release transaction on Base.
+4. **Base Bank Contract:** Releases 1,000 `SyncUSD` from its *local liquidity pool* to Charlie's wallet on Base (caller must have `RELAYER_ROLE`).
+5. **Treasury Service (Watcher):** Independently verifies the release matches the source event. If any mismatch is detected, the watcher triggers the Bank Contract's `pause()` mechanism.
+6. **UX:** Charlie receives the funds instantly. Bob's balance updates instantly. No one waits for CCIP.
 
 ### 4. Background Settlement (The Cold Path)
 **Scenario:** After thousands of cross-chain transfers, the Base liquidity pool is running low.
