@@ -1,0 +1,25 @@
+export const HANDOFF_AUTH_CONTRACT_CASES = {
+  supportedChains: ["base-sepolia", "arbitrum-sepolia"],
+  pinnedSnapshotBoundary: {
+    customerId: "customer-38",
+    initialConfigRequestId: "req-38-config-001",
+    initialScenarioRequestId: "req-38-scenario-001",
+    postRunStartScenarioRequestId: "req-38-scenario-002",
+    initialAllowedChains: ["base-sepolia", "arbitrum-sepolia"],
+    initialScenario: "congested",
+    postRunStartScenario: "normal",
+    configAt: "2026-02-22T09:00:00.000Z",
+    scenarioAt: "2026-02-22T09:00:01.000Z",
+    runStartAt: "2026-02-22T09:00:02.000Z",
+    postRunStartWriteAt: "2026-02-22T09:00:03.000Z",
+    nextRunStartAt: "2026-02-22T09:01:02.000Z",
+  },
+  authAuditParity: {
+    customerId: "customer-38-auth",
+    unauthorizedRequestId: "req-38-auth-rejected",
+    authorizedRequestId: "req-38-auth-accepted",
+    authorizedAllowedChains: ["base-sepolia"],
+    unauthorizedAt: "2026-02-22T10:00:00.000Z",
+    authorizedAt: "2026-02-22T10:00:01.000Z",
+  },
+} as const;

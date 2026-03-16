@@ -1,0 +1,4 @@
+{
+  "workflowName": "cre-policy",
+  "defaultActivationThreshold": 0.7
+}

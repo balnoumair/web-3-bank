@@ -1,0 +1,11 @@
+{
+  "name": "@repo/cre-evaluator-runtime",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "cre-compile": "bun x cre-compile"
+  },
+  "dependencies": {
+    "@chainlink/cre-sdk": "^1.1.3"
+  }
+}

@@ -38,3 +38,17 @@ yarn-error.log*
 .vscode
 .DS_Store
 *.pem
+
+# CRE build artifacts
+.cre_build_tmp.js
+
+# Foundry build artifacts
+**/foundry/out/
+**/foundry/cache/
+**/foundry/broadcast/
+
+# CRE E2E artifacts
+apps/cre-workflows/artifacts/
+
+# Conductor context
+.context/
