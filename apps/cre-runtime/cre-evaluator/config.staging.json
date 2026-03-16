@@ -1,0 +1,39 @@
+{
+  "workflowName": "cre-evaluator",
+  "defaultActivationThreshold": 0.7,
+  "destinationChain": "base-sepolia",
+  "defiLlamaUrl": "https://api.llama.fi/v2/chains",
+  "cronSchedule": "*/5 * * * *",
+  "active": true,
+  "defaultAllowedChains": [
+    "base-sepolia",
+    "arbitrum-sepolia",
+    "optimism-sepolia",
+    "polygon-amoy",
+    "ethereum-sepolia"
+  ],
+  "defaultScenario": "normal",
+  "defaultCustomerId": "cron-auto",
+  "chainRegistry": {
+    "base-sepolia": {
+      "rpcUrl": "https://sepolia.base.org",
+      "defiLlamaName": "Base"
+    },
+    "arbitrum-sepolia": {
+      "rpcUrl": "https://sepolia-rollup.arbitrum.io/rpc",
+      "defiLlamaName": "Arbitrum"
+    },
+    "optimism-sepolia": {
+      "rpcUrl": "https://sepolia.optimism.io",
+      "defiLlamaName": "OP Mainnet"
+    },
+    "polygon-amoy": {
+      "rpcUrl": "https://rpc-amoy.polygon.technology",
+      "defiLlamaName": "Polygon"
+    },
+    "ethereum-sepolia": {
+      "rpcUrl": "https://ethereum-sepolia-rpc.publicnode.com",
+      "defiLlamaName": "Ethereum"
+    }
+  }
+}
