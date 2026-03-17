@@ -16,7 +16,7 @@ Set up the Rust project structure for the Treasury Service at `services/treasury
 
 ## 1. Repository Layout
 
-The service lives at `services/treasury/` inside the monorepo root as a standalone Cargo workspace. It is not part of the pnpm workspace.
+The service lives at `services/treasury/` inside the monorepo root as a standalone Cargo workspace. It is not part of the pnpm workspace. The monorepo root does not contain a `Cargo.toml` (it is a pnpm/Node monorepo), so no workspace exclusion is needed — `services/treasury/` is the root of its own independent Cargo workspace.
 
 ```
 services/treasury/
@@ -26,6 +26,7 @@ services/treasury/
 ├── proto/
 │   └── treasury.proto      # gRPC service contract
 ├── migrations/
+│   ├── 20260317000000_create_schema.sql
 │   ├── 20260317000001_relay_logs.sql
 │   ├── 20260317000002_pool_snapshots.sql
 │   └── 20260317000003_watcher_alerts.sql
@@ -91,7 +92,7 @@ message GetWatcherAlertsRequest  { uint32 limit = 1; }
 message GetWatcherAlertsResponse { repeated string alert_ids = 1; }
 ```
 
-`build.rs` runs `tonic-build` to generate the server trait. All RPCs except `HealthCheck` return `Status::UNIMPLEMENTED` at scaffold stage. `HealthCheck` runs the real startup validation checks and returns live status.
+`build.rs` runs `tonic-build` to generate the server trait. All RPCs except `HealthCheck` return `Status::UNIMPLEMENTED` at scaffold stage. `HealthCheck` re-executes the three health checks live on each call (DB ping, RPC reachability, key file parse) and returns the aggregate result. This means the server can be running yet report `NOT_SERVING` if a downstream dependency becomes unavailable — useful for readiness probes.
 
 ---
 
@@ -104,22 +105,30 @@ message GetWatcherAlertsResponse { repeated string alert_ids = 1; }
 | `tonic-build` (build-dep) | Proto codegen |
 | `prost` | Protobuf encoding |
 | `sqlx` | Async PostgreSQL (`postgres`, `runtime-tokio-rustls`, `macros`, `migrate`) |
-| `alloy` | EVM interaction (event listening, tx submission, contract reads) |
+| `alloy` | `Address` type in `Config` (`features = ["primitives"]`); EVM interaction deferred to Tasks 05/06 |
 | `tracing` | Structured logging |
 | `tracing-subscriber` | Log formatting / env filter |
-| `envy` | Env var → struct deserialization |
-| `serde` | Serialization (for `envy`) |
-| `tokio` | Async runtime |
+| `envy` | Env var → struct deserialization (scalar fields only) |
+| `serde` | Serialization (for `envy` and JSON config fields) |
+| `serde_json` | Deserialize JSON-encoded env vars for multi-chain maps |
+| `reqwest` | Raw JSON-RPC calls for RPC reachability check (`features = ["json", "rustls-tls"]` — matches `sqlx`'s `runtime-tokio-rustls` TLS backend to avoid link conflicts) |
 | `thiserror` | Error types |
 
 ---
 
 ## 4. Database Schema
 
-Three migrations under `treasury` schema. All run via `sqlx::migrate!()` at startup.
+Four migrations under `treasury` schema. All run via `sqlx::migrate!()` at startup.
+
+### Migration 0: Schema creation
+```sql
+-- 20260317000000_create_schema.sql
+CREATE SCHEMA IF NOT EXISTS treasury;
+```
 
 ### `relay_logs`
 ```sql
+-- 20260317000001_relay_logs.sql
 CREATE TABLE treasury.relay_logs (
     id                BIGSERIAL PRIMARY KEY,
     source_event_hash TEXT        NOT NULL UNIQUE,
@@ -136,6 +145,7 @@ CREATE TABLE treasury.relay_logs (
 
 ### `pool_snapshots`
 ```sql
+-- 20260317000002_pool_snapshots.sql
 CREATE TABLE treasury.pool_snapshots (
     id          BIGSERIAL PRIMARY KEY,
     chain_id    BIGINT      NOT NULL,
@@ -146,6 +156,7 @@ CREATE TABLE treasury.pool_snapshots (
 
 ### `watcher_alerts`
 ```sql
+-- 20260317000003_watcher_alerts.sql
 CREATE TABLE treasury.watcher_alerts (
     id                BIGSERIAL PRIMARY KEY,
     source_event_hash TEXT        NOT NULL,
@@ -162,20 +173,40 @@ CREATE TABLE treasury.watcher_alerts (
 
 ## 5. Configuration (`config.rs`)
 
-Loaded from environment variables at startup via `envy`. The service panics fast on missing/invalid config rather than failing at first use.
+Construction is two-step:
+
+1. Scalar fields are loaded via a separate `#[derive(serde::Deserialize)]` helper struct through `envy::from_env::<ScalarConfig>()`.
+2. `rpc_urls` and `contract_addresses` are read manually via `std::env::var("RPC_URLS_JSON")` + `serde_json::from_str(...)`, then assembled into `Config`.
+
+`grpc_port` defaults to `50051` via `#[serde(default = "default_grpc_port")]` on the helper struct, where `fn default_grpc_port() -> u16 { 50051 }`.
 
 ```rust
+use alloy::primitives::Address;
+
+// Internal helper — only scalar fields, deserialized by envy
+#[derive(serde::Deserialize)]
+struct ScalarConfig {
+    database_url: String,
+    #[serde(default = "default_grpc_port")]
+    grpc_port: u16,
+    route_receiver_address: Address,  // env: ROUTE_RECEIVER_ADDRESS (0x-prefixed hex)
+    relayer_key_path: String,         // env: RELAYER_KEY_PATH
+}
+
+// Public config, constructed from ScalarConfig + JSON env vars
 pub struct Config {
     pub database_url: String,
-    pub grpc_port: u16,                            // default: 50051
-    pub rpc_urls: HashMap<u64, String>,            // chain_id -> RPC URL
-    pub contract_addresses: HashMap<u64, Address>, // chain_id -> BankContract address
-    pub route_receiver_address: Address,           // RouteReceiver.sol (Base Sepolia)
-    pub relayer_key_path: String,                  // path to relayer private key file
+    pub grpc_port: u16,
+    pub rpc_urls: HashMap<u64, String>,            // env: RPC_URLS_JSON = {"1":"https://...","8453":"https://..."}
+    pub contract_addresses: HashMap<u64, Address>, // env: CONTRACT_ADDRESSES_JSON = {"1":"0x...","8453":"0x..."}
+    pub route_receiver_address: Address,
+    pub relayer_key_path: String,
 }
 ```
 
-`.env.example` documents every variable with descriptions.
+`Address` is `alloy::primitives::Address` (enabled via `alloy` with `features = ["primitives"]`).
+
+`.env.example` documents every variable with format examples, including JSON examples for `RPC_URLS_JSON` and `CONTRACT_ADDRESSES_JSON`.
 
 ---
 
@@ -201,22 +232,30 @@ volumes:
 
 ## 7. Startup Validation
 
-Before the gRPC server binds, three checks run concurrently via `tokio::join!`:
+Startup proceeds in two sequential phases before the gRPC server binds:
 
-1. **DB** — run `sqlx::migrate!()` then `SELECT 1` to confirm connectivity
-2. **RPC** — `eth_blockNumber` on each configured chain RPC URL
-3. **Relayer key** — read file at `relayer_key_path`, parse as a valid private key
+**Phase A — Migrations (sequential, must complete before Phase B):**
+Run `sqlx::migrate!()`. This acquires Postgres advisory lock, applies all pending migrations, and releases the lock. If this fails, log the error and abort immediately. Migration failure is distinct from connectivity failure and is reported separately to ops.
 
-Any failure logs a clear error and aborts startup. The `HealthCheck` RPC reports live state of all three checks.
+**Phase B — Concurrent readiness checks (via `tokio::join!`):**
+All three checks run to completion regardless of individual failures. After all three finish, if any failed: log each failure with context, then abort. This ensures the operator sees all missing dependencies at once.
+
+1. **DB connectivity** — send `SELECT 1` to confirm the connection pool is live post-migration
+2. **RPC reachability** — send `eth_blockNumber` via raw JSON-RPC (`reqwest`) to each configured chain URL; `rpc_reachable` is `true` only if **all** configured chains respond successfully
+3. **Relayer key** — read file at `relayer_key_path`, parse as a `0x`-prefixed 64-character hex string (UTF-8, optional trailing newline); verify it decodes to a valid 32-byte value
+
+`HealthCheck` RPC re-executes Phase B checks live on each call (not Phase A — migrations do not re-run). Returns `db_connected`, `rpc_reachable`, `relayer_key_loaded` individually. The aggregate `status` is `SERVING` only if all three pass, otherwise `NOT_SERVING`.
 
 ---
 
 ## 8. Acceptance Criteria
 
 - `cargo build` compiles without errors
-- `cargo test` passes (unit tests for config parsing, migration smoke test)
+- `cargo test` passes, including:
+  - Unit test: `Config` parses correctly from a set of env vars (including valid JSON for `RPC_URLS_JSON` and `CONTRACT_ADDRESSES_JSON`)
+  - Integration test: all four migrations apply cleanly using `#[sqlx::test]` — the macro creates a temporary logical database on a running Postgres instance (configured via `DATABASE_URL` or `TEST_DATABASE_URL`). **A Postgres service must be available** — the macro does not launch Postgres itself. Local: use `docker compose up postgres`. CI: add a Postgres service container.
 - `docker compose up` brings up Postgres
-- `HealthCheck` gRPC call returns a response (SERVING or NOT_SERVING depending on env)
+- `HealthCheck` gRPC call returns a response (`SERVING` or `NOT_SERVING` depending on env)
 - All non-`HealthCheck` RPCs return `UNIMPLEMENTED`
 
 ---
