@@ -106,7 +106,7 @@ message GetWatcherAlertsResponse { repeated string alert_ids = 1; }
 | `tokio` | Async runtime (`full` features) |
 | `tonic` | gRPC server |
 | `tonic-build` (build-dep) | Proto codegen |
-| `protoc-bin-vendored` (build-dep) | Vendored `protoc` binary — eliminates the system `protoc` requirement; wired in `build.rs` via `tonic_build::configure().protoc_executable(protoc_bin_vendored::protoc()).compile_protos(...)` |
+| `protoc-bin-vendored` (build-dep) | Vendored `protoc` binary — eliminates the system `protoc` requirement; wired in `build.rs` by setting `std::env::set_var("PROTOC", protoc_bin_vendored::protoc_bin_path().unwrap())` before calling `tonic_build::compile_protos("proto/treasury.proto").unwrap()` |
 | `prost` | Protobuf encoding |
 | `sqlx` | Async PostgreSQL (`postgres`, `runtime-tokio-rustls`, `macros`, `migrate`) |
 | `alloy` | `Address` type in `Config` (`features = ["primitives"]`); EVM interaction deferred to Tasks 05/06 |
