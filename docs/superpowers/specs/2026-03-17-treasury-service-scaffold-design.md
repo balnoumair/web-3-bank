@@ -32,6 +32,7 @@ services/treasury/
 │   └── 20260317000003_watcher_alerts.sql
 ├── src/
 │   ├── main.rs             # starts tonic server, runs startup validation
+│   ├── proto.rs            # tonic::include_proto!("treasury") — generated types
 │   ├── config.rs           # env-based config
 │   ├── hot_path/
 │   │   ├── mod.rs
@@ -92,7 +93,9 @@ message GetWatcherAlertsRequest  { uint32 limit = 1; }
 message GetWatcherAlertsResponse { repeated string alert_ids = 1; }
 ```
 
-`build.rs` runs `tonic-build` to generate the server trait. All RPCs except `HealthCheck` return `Status::UNIMPLEMENTED` at scaffold stage. `HealthCheck` re-executes the three health checks live on each call (DB ping, RPC reachability, key file parse) and returns the aggregate result. This means the server can be running yet report `NOT_SERVING` if a downstream dependency becomes unavailable — useful for readiness probes.
+`build.rs` runs `tonic-build` to generate the server trait into `OUT_DIR`. `src/proto.rs` includes it via `tonic::include_proto!("treasury")`. Generated types are referenced throughout the codebase as `crate::proto::treasury_server::TreasuryServiceServer` and related types. All RPCs except `HealthCheck` return `Status::UNIMPLEMENTED` at scaffold stage. `HealthCheck` re-executes the three health checks live on each call (DB ping, RPC reachability, key file parse) and returns the aggregate result. This means the server can be running yet report `NOT_SERVING` if a downstream dependency becomes unavailable — useful for readiness probes.
+
+**Phase 1 limitation:** `rpc_reachable` is a single `bool` — `true` only if all configured chains respond. Per-chain failure detail is not surfaced in the response; failures are logged server-side. Finer-grained chain-level reporting is out of scope for the scaffold.
 
 ---
 
@@ -173,33 +176,33 @@ CREATE TABLE treasury.watcher_alerts (
 
 ## 5. Configuration (`config.rs`)
 
-Construction is two-step:
+Construction is two-step. All `Address` fields are parsed manually via `Address::from_str` (not via `envy`) to avoid relying on `alloy`'s serde impl interoperating correctly with `envy`'s string coercion path.
 
-1. Scalar fields are loaded via a separate `#[derive(serde::Deserialize)]` helper struct through `envy::from_env::<ScalarConfig>()`.
-2. `rpc_urls` and `contract_addresses` are read manually via `std::env::var("RPC_URLS_JSON")` + `serde_json::from_str(...)`, then assembled into `Config`.
-
-`grpc_port` defaults to `50051` via `#[serde(default = "default_grpc_port")]` on the helper struct, where `fn default_grpc_port() -> u16 { 50051 }`.
+1. String/integer scalar fields are loaded via a `#[derive(serde::Deserialize)]` helper struct through `envy::from_env::<ScalarConfig>()`. `grpc_port` defaults to `50051` via `#[serde(default = "default_grpc_port")]` where `fn default_grpc_port() -> u16 { 50051 }`.
+2. All other fields are read manually via `std::env::var(...)` and parsed explicitly, then assembled into `Config`:
+   - `ROUTE_RECEIVER_ADDRESS` → `Address::from_str(...)?`
+   - `RPC_URLS_JSON` → `serde_json::from_str::<HashMap<u64, String>>(...)?`
+   - `CONTRACT_ADDRESSES_JSON` → `serde_json::from_str::<HashMap<u64, String>>(...)?` then each value parsed with `Address::from_str`
 
 ```rust
 use alloy::primitives::Address;
 
-// Internal helper — only scalar fields, deserialized by envy
+// Internal helper — only plain string/int scalar fields
 #[derive(serde::Deserialize)]
 struct ScalarConfig {
     database_url: String,
     #[serde(default = "default_grpc_port")]
     grpc_port: u16,
-    route_receiver_address: Address,  // env: ROUTE_RECEIVER_ADDRESS (0x-prefixed hex)
-    relayer_key_path: String,         // env: RELAYER_KEY_PATH
+    relayer_key_path: String,  // env: RELAYER_KEY_PATH
 }
 
-// Public config, constructed from ScalarConfig + JSON env vars
+// Public config — fully constructed in Config::from_env()
 pub struct Config {
     pub database_url: String,
     pub grpc_port: u16,
     pub rpc_urls: HashMap<u64, String>,            // env: RPC_URLS_JSON = {"1":"https://...","8453":"https://..."}
     pub contract_addresses: HashMap<u64, Address>, // env: CONTRACT_ADDRESSES_JSON = {"1":"0x...","8453":"0x..."}
-    pub route_receiver_address: Address,
+    pub route_receiver_address: Address,           // env: ROUTE_RECEIVER_ADDRESS = "0x..."
     pub relayer_key_path: String,
 }
 ```
@@ -235,7 +238,7 @@ volumes:
 Startup proceeds in two sequential phases before the gRPC server binds:
 
 **Phase A — Migrations (sequential, must complete before Phase B):**
-Run `sqlx::migrate!()`. This acquires Postgres advisory lock, applies all pending migrations, and releases the lock. If this fails, log the error and abort immediately. Migration failure is distinct from connectivity failure and is reported separately to ops.
+Run `sqlx::migrate!("../migrations")` from `db/mod.rs` (path is relative to the file at compile time, resolving to `services/treasury/migrations/`). This acquires the Postgres advisory lock, applies all pending migrations, and releases the lock. If this fails, log the error and abort immediately. Migration failure is distinct from connectivity failure and is reported separately to ops.
 
 **Phase B — Concurrent readiness checks (via `tokio::join!`):**
 All three checks run to completion regardless of individual failures. After all three finish, if any failed: log each failure with context, then abort. This ensures the operator sees all missing dependencies at once.
@@ -253,7 +256,7 @@ All three checks run to completion regardless of individual failures. After all 
 - `cargo build` compiles without errors
 - `cargo test` passes, including:
   - Unit test: `Config` parses correctly from a set of env vars (including valid JSON for `RPC_URLS_JSON` and `CONTRACT_ADDRESSES_JSON`)
-  - Integration test: all four migrations apply cleanly using `#[sqlx::test]` — the macro creates a temporary logical database on a running Postgres instance (configured via `DATABASE_URL` or `TEST_DATABASE_URL`). **A Postgres service must be available** — the macro does not launch Postgres itself. Local: use `docker compose up postgres`. CI: add a Postgres service container.
+  - Integration test: all four migrations apply cleanly using `#[sqlx::test]` — the macro creates a temporary logical database on a running Postgres instance configured via `DATABASE_URL`. **A Postgres service must be available** — the macro does not launch Postgres itself. Local: `docker compose up postgres`. CI: add a Postgres service container and set `DATABASE_URL`.
 - `docker compose up` brings up Postgres
 - `HealthCheck` gRPC call returns a response (`SERVING` or `NOT_SERVING` depending on env)
 - All non-`HealthCheck` RPCs return `UNIMPLEMENTED`
