@@ -140,8 +140,10 @@ message AddCredentialRequest {
   string tempo_address = 4;
 }
 
+// credential_id returned as string (base64url) so the BFF can forward it
+// to the GraphQL client without a Buffer-to-string conversion step.
 message AddCredentialResponse {
-  bytes credential_id = 1;
+  string credential_id = 1;  // base64url-encoded credential ID
 }
 
 // optional keyword (proto3 syntax) lets the service distinguish
@@ -172,6 +174,8 @@ message RevokeCredentialResponse {}
 ### PostgreSQL Schema (`users` schema)
 
 ```sql
+CREATE SCHEMA IF NOT EXISTS users;
+
 CREATE TABLE users.users (
     id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     display_name TEXT        NOT NULL DEFAULT '',
@@ -252,7 +256,7 @@ The `Dockerfile` `RUST_VERSION` build arg must match this value. Both are update
 | `tempo_address` not found in `GetUserByAddress` | Explicit check; never return empty | `NOT_FOUND` |
 | User not found before `AddCredential` / `RevokeCredential` | Lookup before mutation | `NOT_FOUND` |
 | Credential not found before `RevokeCredential` | Lookup before update | `NOT_FOUND` |
-| Revoking the user's last active credential | Atomic check inside a transaction: `SELECT COUNT(*) FROM credentials WHERE user_id = $1 AND revoked_at IS NULL FOR UPDATE` — reject if count would reach zero | `FAILED_PRECONDITION` |
+| Revoking the user's last active credential | Inside a transaction: `SELECT id FROM credentials WHERE user_id = $1 AND revoked_at IS NULL FOR UPDATE` — lock rows, count results in application code; reject if count would reach zero | `FAILED_PRECONDITION` |
 
 **Authorization:** The User Service trusts all callers (internal network only, no public exposure). Authorization — ensuring a JWT session user can only modify their own data — is enforced exclusively at the BFF layer before the gRPC call is made.
 
@@ -343,7 +347,7 @@ Treasury service will be added to this file when Task 04 is complete.
 
 The BFF switches its User Service client from `fetch()` (HTTP) to `@grpc/grpc-js`.
 
-**credential_id encoding:** The browser's WebAuthn API returns `credential_id` as a base64url string. The BFF must base64url-decode it to raw bytes before populating any `bytes credential_id` gRPC field.
+**credential_id encoding:** The browser's WebAuthn API returns `credential_id` as a base64url string. The BFF must base64url-decode it to raw bytes before populating any `bytes credential_id` gRPC field. `AddCredentialResponse.credential_id` is returned as a base64url `string` (not bytes) so the BFF can forward it to the GraphQL client directly without re-encoding a `Buffer`.
 
 **user_id injection:** The BFF must never accept `user_id` from the GraphQL client. For `addCredential` and `revokeCredential`, the BFF extracts `user_id` from the validated JWT session and injects it into the gRPC request. This is where authorization is enforced.
 
