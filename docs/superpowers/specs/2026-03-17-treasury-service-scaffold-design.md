@@ -93,9 +93,9 @@ message GetWatcherAlertsRequest  { uint32 limit = 1; }
 message GetWatcherAlertsResponse { repeated string alert_ids = 1; }
 ```
 
-`build.rs` runs `tonic-build` to generate the server trait into `OUT_DIR`. `src/proto.rs` includes it via `tonic::include_proto!("treasury")`. Generated types are referenced throughout the codebase as `crate::proto::treasury_server::TreasuryServiceServer` and related types. All RPCs except `HealthCheck` return `Status::UNIMPLEMENTED` at scaffold stage. `HealthCheck` re-executes the three health checks live on each call (DB ping, RPC reachability, key file parse) and returns the aggregate result. This means the server can be running yet report `NOT_SERVING` if a downstream dependency becomes unavailable — useful for readiness probes.
+`build.rs` runs `tonic-build` to generate the server trait into `OUT_DIR`. `src/proto.rs` includes it via `tonic::include_proto!("treasury")`. Generated types are referenced throughout the codebase as `crate::proto::treasury_service_server::TreasuryServiceServer` and related types (tonic snake-cases the service name: `TreasuryService` → `treasury_service_server`). All RPCs except `HealthCheck` return `Status::UNIMPLEMENTED` at scaffold stage. `HealthCheck` re-executes the three health checks live on each call (DB ping, RPC reachability, key file parse) and returns the aggregate result. This means the server can be running yet report `NOT_SERVING` if a downstream dependency becomes unavailable — useful for readiness probes.
 
-**Phase 1 limitation:** `rpc_reachable` is a single `bool` — `true` only if all configured chains respond. Per-chain failure detail is not surfaced in the response; failures are logged server-side. Finer-grained chain-level reporting is out of scope for the scaffold.
+**Phase 1 limitation:** `rpc_reachable` is a single `bool` — `true` only if all configured chains respond. Per-chain failure detail is not surfaced in the response; failures are logged server-side. Finer-grained chain-level reporting is out of scope for the scaffold. `UNKNOWN = 0` is never returned by the implementation; it exists only as the required proto3 zero value. At runtime, the response is always `SERVING` or `NOT_SERVING`.
 
 ---
 
@@ -223,13 +223,15 @@ services:
     image: postgres:16-alpine
     environment:
       POSTGRES_DB: web3bank
-      POSTGRES_USER: treasury
-      POSTGRES_PASSWORD: treasury
+      POSTGRES_USER: postgres        # superuser required for #[sqlx::test] CREATEDB
+      POSTGRES_PASSWORD: postgres
     ports: ["5432:5432"]
     volumes: ["treasury_pgdata:/var/lib/postgresql/data"]
 volumes:
   treasury_pgdata:
 ```
+
+The application runtime uses `DATABASE_URL=postgres://postgres:postgres@localhost:5432/web3bank`. Tests also use this `DATABASE_URL`; `#[sqlx::test]` requires the user to have `CREATEDB` privileges, which the `postgres` superuser satisfies.
 
 ---
 
@@ -238,14 +240,14 @@ volumes:
 Startup proceeds in two sequential phases before the gRPC server binds:
 
 **Phase A — Migrations (sequential, must complete before Phase B):**
-Run `sqlx::migrate!("../migrations")` from `db/mod.rs` (path is relative to the file at compile time, resolving to `services/treasury/migrations/`). This acquires the Postgres advisory lock, applies all pending migrations, and releases the lock. If this fails, log the error and abort immediately. Migration failure is distinct from connectivity failure and is reported separately to ops.
+Run `sqlx::migrate!("migrations")` from `db/mod.rs` (path is relative to `Cargo.toml`, resolving to `services/treasury/migrations/`). This acquires the Postgres advisory lock, applies all pending migrations, and releases the lock. If this fails, log the error and abort immediately. Migration failure is distinct from connectivity failure and is reported separately to ops.
 
 **Phase B — Concurrent readiness checks (via `tokio::join!`):**
 All three checks run to completion regardless of individual failures. After all three finish, if any failed: log each failure with context, then abort. This ensures the operator sees all missing dependencies at once.
 
 1. **DB connectivity** — send `SELECT 1` to confirm the connection pool is live post-migration
 2. **RPC reachability** — send `eth_blockNumber` via raw JSON-RPC (`reqwest`) to each configured chain URL; `rpc_reachable` is `true` only if **all** configured chains respond successfully
-3. **Relayer key** — read file at `relayer_key_path`, parse as a `0x`-prefixed 64-character hex string (UTF-8, optional trailing newline); verify it decodes to a valid 32-byte value
+3. **Relayer key** — read file at `Config::relayer_key_path` (env var `RELAYER_KEY_PATH`), parse as a `0x`-prefixed 64-character hex string (UTF-8, optional trailing newline); verify it decodes to a valid 32-byte value
 
 `HealthCheck` RPC re-executes Phase B checks live on each call (not Phase A — migrations do not re-run). Returns `db_connected`, `rpc_reachable`, `relayer_key_loaded` individually. The aggregate `status` is `SERVING` only if all three pass, otherwise `NOT_SERVING`.
 
@@ -256,7 +258,7 @@ All three checks run to completion regardless of individual failures. After all 
 - `cargo build` compiles without errors
 - `cargo test` passes, including:
   - Unit test: `Config` parses correctly from a set of env vars (including valid JSON for `RPC_URLS_JSON` and `CONTRACT_ADDRESSES_JSON`)
-  - Integration test: all four migrations apply cleanly using `#[sqlx::test]` — the macro creates a temporary logical database on a running Postgres instance configured via `DATABASE_URL`. **A Postgres service must be available** — the macro does not launch Postgres itself. Local: `docker compose up postgres`. CI: add a Postgres service container and set `DATABASE_URL`.
+  - Integration test: all four migrations apply cleanly using `#[sqlx::test]` — the macro creates a temporary logical database on a running Postgres superuser instance (the `postgres` user defined in `docker-compose.yml`). `DATABASE_URL` must point to `postgres://postgres:postgres@localhost:5432/web3bank`. **A Postgres service must be available** — the macro does not launch Postgres itself. Local: `docker compose up postgres`. CI: add a Postgres service container with the same superuser credentials and set `DATABASE_URL`.
 - `docker compose up` brings up Postgres
 - `HealthCheck` gRPC call returns a response (`SERVING` or `NOT_SERVING` depending on env)
 - All non-`HealthCheck` RPCs return `UNIMPLEMENTED`
