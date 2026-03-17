@@ -22,25 +22,23 @@ message CreateUserResponse { string user_id = 1; }
 
 message GetUserByAddressRequest { string tempo_address = 1; }
 message GetUserByAddressResponse {
-  string user_id      = 1;
-  string display_name = 2;
-  string status       = 3;
-  string created_at   = 4;
+  string user_id       = 1;
+  string display_name  = 2;
+  string status        = 3;
+  string tempo_address = 4;
 }
 
 message ListCredentialsRequest {
-  string user_id     = 1;
-  bool   active_only = 2;
+  string user_id = 1;
 }
 message ListCredentialsResponse { repeated Credential credentials = 1; }
 
 // public_key intentionally omitted: Tempo verifies WebAuthn on-chain.
 message Credential {
-  string          id            = 1;
-  bytes           credential_id = 2;
-  string          tempo_address = 3;
-  string          created_at    = 4;
-  optional string revoked_at    = 5;
+  string credential_id = 1;  // base64url-encoded
+  string tempo_address = 2;
+  string created_at = 3;
+  bool revoked = 4;
 }
 
 // user_id injected by BFF from JWT session — never from the client.
@@ -60,11 +58,12 @@ message UpdateUserRequest {
 message UpdateUserResponse {
   string user_id      = 1;
   string display_name = 2;
-  string updated_at   = 3;
 }
 
 message RevokeCredentialRequest {
   string user_id       = 1;
   bytes  credential_id = 2;
 }
-message RevokeCredentialResponse {}
+message RevokeCredentialResponse {
+  bool success = 1;
+}
