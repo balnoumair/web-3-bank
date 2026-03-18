@@ -23,8 +23,7 @@ reqwest     = { version = "0.12", default-features = false, features = ["json", 
 thiserror   = "1"
 
 [build-dependencies]
-tonic-build          = "0.12"
-protoc-bin-vendored  = "3"
+tonic-build = "0.12"
 
 [dev-dependencies]
 tempfile = "3"

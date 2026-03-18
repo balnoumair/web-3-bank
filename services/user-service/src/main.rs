@@ -35,7 +35,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let (mut health_reporter, health_service) = tonic_health::server::health_reporter();
     health_reporter
-        .set_service_status("user.v1.UserService", ServingStatus::Serving)
+        .set_service_status("user.UserService", ServingStatus::Serving)
         .await;
 
     tracing::info!(addr = %addr, "Starting gRPC server");
