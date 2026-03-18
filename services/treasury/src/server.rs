@@ -1,5 +1,5 @@
-use std::sync::Arc;
 use std::fs;
+use std::sync::Arc;
 
 use sqlx::PgPool;
 use tonic::{Request, Response, Status};
@@ -19,7 +19,7 @@ pub struct TreasuryServer {
     pub pool: PgPool,
     pub hot_path: Arc<HotPath>,
     pub pool_manager: Arc<PoolManager>,
-    pub watcher: Watcher,
+    pub watcher: Arc<Watcher>,
     /// Cached result of the startup relayer-key check.
     pub relayer_key_loaded: bool,
     /// Cached result of the startup RPC reachability check.
