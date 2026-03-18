@@ -19,6 +19,7 @@ pub struct UserWithCredential {
     pub display_name: String,
     pub status: String,
     pub created_at: DateTime<Utc>,
+    pub tempo_address: String,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -59,7 +60,7 @@ pub async fn get_user_by_address(
 ) -> Result<Option<UserWithCredential>, sqlx::Error> {
     sqlx::query_as!(
         UserWithCredential,
-        "SELECT u.id AS user_id, u.display_name, u.status, u.created_at
+        "SELECT u.id AS user_id, u.display_name, u.status, u.created_at, c.tempo_address
          FROM users.credentials c
          JOIN users.users u ON u.id = c.user_id
          WHERE c.tempo_address = $1 AND c.revoked_at IS NULL",
