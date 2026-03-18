@@ -1,0 +1,10 @@
+/Users/bryanal-noumair/Projects/web3Bank/.claude/worktrees/gracious-nash/services/treasury/target/debug/deps/libidna-137c9c0d8d6a4256.rmeta: /Users/bryanal-noumair/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/idna-1.1.0/src/lib.rs /Users/bryanal-noumair/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/idna-1.1.0/src/deprecated.rs /Users/bryanal-noumair/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/idna-1.1.0/src/punycode.rs /Users/bryanal-noumair/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/idna-1.1.0/src/uts46.rs
+
+/Users/bryanal-noumair/Projects/web3Bank/.claude/worktrees/gracious-nash/services/treasury/target/debug/deps/libidna-137c9c0d8d6a4256.rlib: /Users/bryanal-noumair/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/idna-1.1.0/src/lib.rs /Users/bryanal-noumair/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/idna-1.1.0/src/deprecated.rs /Users/bryanal-noumair/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/idna-1.1.0/src/punycode.rs /Users/bryanal-noumair/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/idna-1.1.0/src/uts46.rs
+
+/Users/bryanal-noumair/Projects/web3Bank/.claude/worktrees/gracious-nash/services/treasury/target/debug/deps/idna-137c9c0d8d6a4256.d: /Users/bryanal-noumair/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/idna-1.1.0/src/lib.rs /Users/bryanal-noumair/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/idna-1.1.0/src/deprecated.rs /Users/bryanal-noumair/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/idna-1.1.0/src/punycode.rs /Users/bryanal-noumair/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/idna-1.1.0/src/uts46.rs
+
+/Users/bryanal-noumair/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/idna-1.1.0/src/lib.rs:
+/Users/bryanal-noumair/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/idna-1.1.0/src/deprecated.rs:
+/Users/bryanal-noumair/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/idna-1.1.0/src/punycode.rs:
+/Users/bryanal-noumair/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/idna-1.1.0/src/uts46.rs:

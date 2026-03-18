@@ -1,0 +1,30 @@
+# services/treasury/Cargo.toml
+[package]
+name = "treasury"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "treasury"
+path = "src/main.rs"
+
+[dependencies]
+tokio       = { version = "1",    features = ["full"] }
+tonic       = "0.12"
+prost       = "0.13"
+sqlx        = { version = "0.8",  features = ["postgres", "runtime-tokio-rustls", "macros", "migrate"] }
+alloy-primitives = "0.8"
+tracing     = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+envy        = "0.4"
+serde       = { version = "1",    features = ["derive"] }
+serde_json  = "1"
+reqwest     = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+thiserror   = "1"
+
+[build-dependencies]
+tonic-build          = "0.12"
+protoc-bin-vendored  = "3"
+
+[dev-dependencies]
+tempfile = "3"

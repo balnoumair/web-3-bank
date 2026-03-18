@@ -1,0 +1,38 @@
+// services/treasury/proto/treasury.proto
+syntax = "proto3";
+package treasury;
+
+service TreasuryService {
+  rpc HealthCheck(HealthCheckRequest) returns (HealthCheckResponse);
+
+  // Hot path — implemented in Task 05
+  rpc GetRelayStatus(GetRelayStatusRequest) returns (GetRelayStatusResponse);
+
+  // Pool management — implemented in Task 05/10
+  rpc GetPoolDepth(GetPoolDepthRequest) returns (GetPoolDepthResponse);
+
+  // Watcher — implemented in Task 06
+  rpc GetWatcherAlerts(GetWatcherAlertsRequest) returns (GetWatcherAlertsResponse);
+}
+
+message HealthCheckRequest {}
+message HealthCheckResponse {
+  enum Status {
+    UNKNOWN     = 0;  // proto3 zero value — never returned at runtime
+    SERVING     = 1;
+    NOT_SERVING = 2;
+  }
+  Status status          = 1;
+  bool   db_connected    = 2;
+  bool   rpc_reachable   = 3;
+  bool   relayer_key_loaded = 4;
+}
+
+message GetRelayStatusRequest  { string source_event_hash = 1; }
+message GetRelayStatusResponse { string status = 1; }
+
+message GetPoolDepthRequest    { uint64 chain_id = 1; }
+message GetPoolDepthResponse   { string depth_wei = 1; }
+
+message GetWatcherAlertsRequest  { uint32 limit = 1; }
+message GetWatcherAlertsResponse { repeated string alert_ids = 1; }
