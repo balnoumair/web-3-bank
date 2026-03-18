@@ -1,0 +1,59 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.24;
+
+import {Script, console2} from "forge-std/Script.sol";
+import {IAccessControl} from "@openzeppelin/contracts/access/IAccessControl.sol";
+import {SyncUSD} from "../src/SyncUSD.sol";
+import {BankContract} from "../src/BankContract.sol";
+
+/// @notice Grants post-deployment roles so the contracts can interact:
+///   1. MINTER_ROLE on SyncUSD  → BankContract proxy  (deposit mints SyncUSD)
+///   2. RELAYER_ROLE on BankContract → relayer EOA/contract
+///
+/// Required env vars:
+///   DEPLOYER_PRIVATE_KEY   — must hold DEFAULT_ADMIN_ROLE on both contracts
+///   SYNC_USD_PROXY         — SyncUSD proxy address
+///   BANK_CONTRACT_PROXY    — BankContract proxy address
+///   RELAYER_ADDRESS        — address that will call hotPathRelease / replenishPool
+///
+/// Usage (run after both proxy deployments):
+///   forge script script/AssignRoles.s.sol --rpc-url base_sepolia --broadcast
+///   forge script script/AssignRoles.s.sol --rpc-url arbitrum_sepolia --broadcast
+contract AssignRoles is Script {
+    function run() external {
+        uint256 deployerKey    = vm.envUint("DEPLOYER_PRIVATE_KEY");
+        address syncUsdProxy   = vm.envAddress("SYNC_USD_PROXY");
+        address bankProxy      = vm.envAddress("BANK_CONTRACT_PROXY");
+        address relayer        = vm.envAddress("RELAYER_ADDRESS");
+
+        SyncUSD      syncUsd  = SyncUSD(syncUsdProxy);
+        BankContract bank     = BankContract(bankProxy);
+
+        bytes32 MINTER_ROLE  = syncUsd.MINTER_ROLE();
+        bytes32 RELAYER_ROLE = bank.RELAYER_ROLE();
+
+        vm.startBroadcast(deployerKey);
+
+        // Grant BankContract the right to mint/burn SyncUSD
+        syncUsd.grantRole(MINTER_ROLE, bankProxy);
+        console2.log("Granted MINTER_ROLE  on SyncUSD     to BankContract :", bankProxy);
+
+        // Grant relayer the right to execute hot-path releases
+        bank.grantRole(RELAYER_ROLE, relayer);
+        console2.log("Granted RELAYER_ROLE on BankContract to relayer      :", relayer);
+
+        vm.stopBroadcast();
+
+        // ── Verification ──────────────────────────────────────────────
+        require(
+            syncUsd.hasRole(MINTER_ROLE, bankProxy),
+            "AssignRoles: MINTER_ROLE not set"
+        );
+        require(
+            bank.hasRole(RELAYER_ROLE, relayer),
+            "AssignRoles: RELAYER_ROLE not set"
+        );
+
+        console2.log("Role assignment verified.");
+    }
+}
