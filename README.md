@@ -71,7 +71,7 @@ flowchart TB
 |-----------|-------------|---------|
 | **Bank Client** (`apps/bank-client`) | SolidJS frontend. Passkey auth via wagmi/viem, Tempo native EIP-2718 transactions. | SolidStart |
 | **BFF** | Thin GraphQL proxy. Forwards requests to backend services, manages JWT sessions. No database, no business logic. | Bun |
-| **User Service** | User profiles, passkey credential-to-address mapping, account state. | TBD |
+| **User Service** | User profiles, passkey credential-to-address mapping, account state. | Rust (tonic gRPC) |
 | **Treasury Service** | Hot path relay, cold path CCIP rebalancing, pool depth management, watcher (fraud detection). | Rust |
 | **CRE Orchestrator** | Scores chains on fee, latency, reliability, liquidity. Publishes rankings to `RouteReceiver.sol`. Separate repo, already ~80% complete. | TypeScript/Bun |
 | **SyncUSD** | Custom stablecoin backed 1:1 by USDC. TIP-20 on Tempo, ERC-20 on other chains. CCIP burn-and-mint for cross-chain movement. | Solidity |

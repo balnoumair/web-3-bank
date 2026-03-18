@@ -134,7 +134,8 @@ The integration is entirely on-chain — no direct service-to-service communicat
 
 | | |
 |---|---|
-| **Runtime** | TBD (Rust or Bun) |
+| **Runtime** | Rust |
+| **Protocol** | gRPC (tonic, port 50051) |
 | **Database** | PostgreSQL (`users` schema) |
 
 The User Service manages user identity and account state:
@@ -162,7 +163,7 @@ This service is called by the BFF when the frontend needs user data. It does not
 | From | To | Protocol |
 |------|----|----------|
 | Frontend → BFF | GraphQL over HTTPS |
-| BFF → User Service | Internal HTTP API |
+| BFF → User Service | gRPC (port 50051) |
 | BFF → Treasury Service | Internal HTTP API |
 | Treasury → RouteReceiver.sol | On-chain reads (RPC) |
 | Treasury → Bank Contracts | On-chain transactions (RPC) |

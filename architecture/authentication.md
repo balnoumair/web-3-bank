@@ -41,7 +41,7 @@ sequenceDiagram
     User->>Browser: Biometric verification
     Note over Browser: Secure Enclave generates<br>P-256 Keypair (Private/Public)
     Browser->>Browser: Derives Tempo Address from Public Key
-    Browser->>BFF: POST /api/users (Address, CredentialID)
+    Browser->>BFF: POST /api/users (Address, CredentialID, PublicKey)
     BFF->>User Service: Forward create user request
     User Service->>User Service: Stores User Profile
     Note over User Service, Tempo Network: The account now exists off-chain.<br>It will be deployed on-chain on the first transaction.
