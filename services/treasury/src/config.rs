@@ -24,6 +24,19 @@ pub struct Config {
 
     /// Path to a file containing the hex-encoded relayer private key.
     pub relayer_key_path: String,
+
+    /// Path to a file containing the hex-encoded pauser private key.
+    /// Used by the watcher to call `pause()` on Bank Contracts when a
+    /// mismatch is detected.  Optional — pause actions are skipped when absent.
+    #[serde(default)]
+    pub pauser_key_path: Option<String>,
+
+    /// Optional JSON map of chain_id → RPC URL for the watcher to use instead
+    /// of `rpc_urls`.  Setting this to a different provider than `rpc_urls`
+    /// ensures the watcher operates independently from the relayer.
+    /// Example: `{"84532":"https://alternative-sepolia.example.com"}`
+    #[serde(default)]
+    pub watcher_rpc_urls: Option<JsonMap<u64, String>>,
 }
 
 fn default_grpc_port() -> u16 {

@@ -67,10 +67,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // ── 3. Construct modules ──────────────────────────────────────────────────
     let hot_path = HotPath::new(pool.clone(), Arc::clone(&cfg), http.clone());
     let pool_manager = PoolManager::new(pool.clone(), Arc::clone(&cfg), http.clone());
+    let watcher = Watcher::new(pool.clone(), Arc::clone(&cfg), http.clone());
 
     // ── 4. Spawn background tasks ─────────────────────────────────────────────
     Arc::clone(&hot_path).spawn_background();
     Arc::clone(&pool_manager).spawn_background();
+    Arc::clone(&watcher).spawn_background();
 
     // ── 5. Bind gRPC server ───────────────────────────────────────────────────
     let addr: SocketAddr = format!("0.0.0.0:{}", cfg.grpc_port).parse()?;
@@ -80,7 +82,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         pool,
         hot_path,
         pool_manager,
-        watcher: Watcher::new(),
+        watcher,
         relayer_key_loaded,
         rpc_reachable,
     };
