@@ -1,0 +1,5 @@
+syntax = "proto3";
+package treasury.v1;
+
+// Stub — Treasury gRPC contract will be defined in Task 04/05.
+service TreasuryService {}

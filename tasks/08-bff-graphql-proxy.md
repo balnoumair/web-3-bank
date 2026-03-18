@@ -22,7 +22,7 @@ Rebuild the BFF as a thin GraphQL proxy that forwards requests to User Service a
   - `poolDepths` — Returns pool depths per chain (proxies to Treasury Service)
   - `recentTransfers` — Returns recent transfer history (proxies to Treasury Service)
 - `Mutation`:
-  - `registerUser(address, credentialId)` — Proxies to User Service `POST /users`
+  - `registerUser(address, credentialId, publicKey, displayName?)` — Proxies to User Service
   - `addCredential(credentialId, publicKey)` — Proxies to User Service
 
 ### JWT Session Management
@@ -32,7 +32,9 @@ Rebuild the BFF as a thin GraphQL proxy that forwards requests to User Service a
 - JWT is for UI session state only — on-chain transactions are signed by passkeys directly
 
 ### Proxy Logic
-- All resolvers forward to internal HTTP services (User Service, Treasury Service)
+- All resolvers forward to backend services via appropriate protocols
+- BFF calls User Service via gRPC using `@grpc/grpc-js`. Proto loaded from `packages/proto/user/v1/user_service.proto`
+- Treasury Service calls use internal HTTP APIs
 - Transform responses into GraphQL-friendly shapes
 - No database access, no business logic, no on-chain interaction
 
