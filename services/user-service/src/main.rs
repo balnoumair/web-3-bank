@@ -20,10 +20,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .init();
 
     tracing::info!("Connecting to database...");
-    let pool = db::connect(&config.database_url).await?;
+    let pool = db::connect(&config.database_url).await.map_err(|e| {
+        tracing::error!("Failed to connect to database: {e}");
+        e
+    })?;
 
     tracing::info!("Running migrations...");
-    sqlx::migrate!("src/db/migrations").run(&pool).await?;
+    sqlx::migrate!("src/db/migrations").run(&pool).await.map_err(|e| {
+        tracing::error!("Failed to run migrations: {e}");
+        e
+    })?;
 
     let addr: std::net::SocketAddr = config.grpc_addr.parse()?;
 
