@@ -45,26 +45,41 @@ impl UserService for UserServiceImpl {
             ));
         }
 
-        // Insert user
-        let user_id = users::insert_user(&self.pool, req.display_name.as_deref())
-            .await
-            .map_err(|e| Status::internal(e.to_string()))?;
+        let mut tx = self.pool.begin().await.map_err(|e| Status::internal(e.to_string()))?;
 
-        // Insert credential — if unique violation, means address already taken
-        credentials::insert_credential(
-            &self.pool,
-            user_id,
-            &req.credential_id,
-            &req.public_key,
-            &req.tempo_address,
+        let name = req.display_name.as_deref().unwrap_or("");
+        let user_row = sqlx::query!(
+            "INSERT INTO users.users (display_name) VALUES ($1) RETURNING id",
+            name
         )
+        .fetch_one(&mut *tx)
         .await
-        .map_err(|e| match &e {
-            credentials::CredentialError::Db(db_err) if pg_is_unique_violation(db_err) => {
-                Status::already_exists("tempo_address already registered")
+        .map_err(|e| Status::internal(e.to_string()))?;
+
+        let user_id = user_row.id;
+
+        let cred_result = sqlx::query!(
+            "INSERT INTO users.credentials (user_id, credential_id, public_key, tempo_address) VALUES ($1, $2, $3, $4) RETURNING id",
+            user_id,
+            req.credential_id.as_slice(),
+            req.public_key.as_slice(),
+            req.tempo_address,
+        )
+        .fetch_one(&mut *tx)
+        .await;
+
+        match cred_result {
+            Ok(_) => {}
+            Err(e) => {
+                drop(tx); // auto-rollback
+                if pg_is_unique_violation(&e) {
+                    return Err(Status::already_exists("address or credential already registered"));
+                }
+                return Err(Status::internal(e.to_string()));
             }
-            _ => Status::internal(e.to_string()),
-        })?;
+        }
+
+        tx.commit().await.map_err(|e| Status::internal(e.to_string()))?;
 
         Ok(Response::new(CreateUserResponse {
             user_id: user_id.to_string(),
@@ -133,6 +148,11 @@ impl UserService for UserServiceImpl {
             ));
         }
 
+        users::get_user_by_id(&self.pool, user_id)
+            .await
+            .map_err(|e| Status::internal(e.to_string()))?
+            .ok_or_else(|| Status::not_found("user not found"))?;
+
         credentials::insert_credential(
             &self.pool,
             user_id,
@@ -162,18 +182,29 @@ impl UserService for UserServiceImpl {
         let req = request.into_inner();
 
         let user_id = Uuid::parse_str(&req.user_id)
-            .map_err(|_| Status::invalid_argument("user_id must be a valid UUID"))?;
+            .map_err(|_| Status::invalid_argument("invalid user_id"))?;
 
-        let new_display_name = req.display_name.as_deref().unwrap_or("");
-
-        users::update_display_name(&self.pool, user_id, new_display_name)
-            .await
-            .map_err(|e| Status::internal(e.to_string()))?;
-
+        // Check user exists first
         let row = users::get_user_by_id(&self.pool, user_id)
             .await
             .map_err(|e| Status::internal(e.to_string()))?
             .ok_or_else(|| Status::not_found("user not found"))?;
+
+        // Only update if display_name is provided (proto3 optional)
+        if let Some(name) = &req.display_name {
+            users::update_display_name(&self.pool, user_id, name)
+                .await
+                .map_err(|e| Status::internal(e.to_string()))?;
+            // Re-fetch to get updated display_name
+            let updated = users::get_user_by_id(&self.pool, user_id)
+                .await
+                .map_err(|e| Status::internal(e.to_string()))?
+                .ok_or_else(|| Status::not_found("user not found"))?;
+            return Ok(Response::new(UpdateUserResponse {
+                user_id: updated.id.to_string(),
+                display_name: updated.display_name,
+            }));
+        }
 
         Ok(Response::new(UpdateUserResponse {
             user_id: row.id.to_string(),
@@ -246,6 +277,7 @@ mod tests {
             .unwrap()
             .into_inner();
         assert!(!resp.user_id.is_empty());
+        Uuid::parse_str(&resp.user_id).expect("user_id must be a valid UUID");
     }
 
     #[sqlx::test(migrations = "src/db/migrations")]
@@ -316,6 +348,8 @@ mod tests {
         assert_eq!(resp.display_name, "Charlie");
         assert_eq!(resp.status, "active");
         assert_eq!(resp.tempo_address, tempo_addr);
+        assert!(!resp.user_id.is_empty());
+        Uuid::parse_str(&resp.user_id).expect("user_id must be a valid UUID");
     }
 
     #[sqlx::test(migrations = "src/db/migrations")]
