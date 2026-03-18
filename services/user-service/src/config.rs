@@ -18,16 +18,21 @@ impl Config {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
+
+    // Serialize config tests that mutate global env vars.
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
 
     #[test]
     fn test_config_missing_database_url() {
-        // Ensure DATABASE_URL is unset
+        let _guard = ENV_LOCK.lock().unwrap();
         env::remove_var("DATABASE_URL");
         assert!(Config::from_env().is_err());
     }
 
     #[test]
     fn test_config_default_grpc_addr() {
+        let _guard = ENV_LOCK.lock().unwrap();
         env::set_var("DATABASE_URL", "postgres://localhost/test");
         env::remove_var("GRPC_ADDR");
         let cfg = Config::from_env().unwrap();
