@@ -12,6 +12,7 @@ pub mod proto {
 }
 
 use std::net::SocketAddr;
+use std::sync::Arc;
 
 use sqlx::postgres::PgPoolOptions;
 use tonic::transport::Server;
@@ -33,7 +34,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         )
         .init();
 
-    let cfg = Config::from_env();
+    let cfg = Arc::new(Config::from_env());
 
     // ── 1. Database: run migrations + verify connectivity ────────────────────
     info!("connecting to database…");
@@ -63,14 +64,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
     }
 
-    // ── 3. Bind gRPC server ───────────────────────────────────────────────────
+    // ── 3. Construct modules ──────────────────────────────────────────────────
+    let hot_path = HotPath::new(pool.clone(), Arc::clone(&cfg), http.clone());
+    let pool_manager = PoolManager::new(pool.clone(), Arc::clone(&cfg), http.clone());
+
+    // ── 4. Spawn background tasks ─────────────────────────────────────────────
+    Arc::clone(&hot_path).spawn_background();
+    Arc::clone(&pool_manager).spawn_background();
+
+    // ── 5. Bind gRPC server ───────────────────────────────────────────────────
     let addr: SocketAddr = format!("0.0.0.0:{}", cfg.grpc_port).parse()?;
     info!(addr = %addr, "treasury gRPC server starting");
 
     let svc = TreasuryServer {
         pool,
-        hot_path: HotPath::new(),
-        pool_manager: PoolManager::new(),
+        hot_path,
+        pool_manager,
         watcher: Watcher::new(),
         relayer_key_loaded,
         rpc_reachable,
