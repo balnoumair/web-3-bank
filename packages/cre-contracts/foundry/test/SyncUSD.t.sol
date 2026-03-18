@@ -83,6 +83,20 @@ contract SyncUSDTest is Test {
         implementation.initialize(admin, pauser);
     }
 
+    function test_initializeRevertsOnZeroAdmin() public {
+        SyncUSD impl = new SyncUSD();
+        bytes memory initData = abi.encodeCall(SyncUSD.initialize, (address(0), pauser));
+        vm.expectRevert(SyncUSD.ZeroAddress.selector);
+        new ERC1967Proxy(address(impl), initData);
+    }
+
+    function test_initializeRevertsOnZeroPauser() public {
+        SyncUSD impl = new SyncUSD();
+        bytes memory initData = abi.encodeCall(SyncUSD.initialize, (admin, address(0)));
+        vm.expectRevert(SyncUSD.ZeroAddress.selector);
+        new ERC1967Proxy(address(impl), initData);
+    }
+
     // ── Pre-mint gate ───────────────────────────────────────────────────
 
     function test_mintRevertsBeforeMinterRoleGranted() public {

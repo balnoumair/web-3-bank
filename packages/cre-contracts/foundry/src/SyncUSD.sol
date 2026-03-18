@@ -25,6 +25,10 @@ contract SyncUSD is
     UUPSUpgradeable,
     IBurnMintERC20
 {
+    // ── Errors ─────────────────────────────────────────────────────────
+
+    error ZeroAddress();
+
     // ── Roles ──────────────────────────────────────────────────────────
 
     bytes32 public constant ADMIN_ROLE = keccak256("ADMIN_ROLE");
@@ -45,6 +49,7 @@ contract SyncUSD is
     /// @param pauser Receives PAUSER_ROLE (emergency multisig in production).
     /// @dev MINTER_ROLE is not granted here — granted post-deploy via grantRole.
     function initialize(address admin, address pauser) external initializer {
+        if (admin == address(0) || pauser == address(0)) revert ZeroAddress();
         __ERC20_init("SyncUSD", "sUSD");
         __AccessControl_init();
         __Pausable_init();
