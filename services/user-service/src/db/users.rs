@@ -33,6 +33,11 @@ pub async fn get_user_by_id(pool: &PgPool, id: Uuid) -> Result<Option<UserRow>, 
     .await
 }
 
+/// Update the display name for a user.
+///
+/// # Precondition
+/// Caller must verify the user exists before calling. This function will silently
+/// succeed (0 rows affected) if `id` does not match any user.
 pub async fn update_display_name(
     pool: &PgPool,
     id: Uuid,

@@ -23,4 +23,5 @@ RUN SQLX_OFFLINE=true cargo build --release
 FROM debian:bookworm-slim
 RUN apt-get update && apt-get install -y ca-certificates && rm -rf /var/lib/apt/lists/*
 COPY --from=builder /app/services/target/release/user-service /usr/local/bin/
+EXPOSE 50051
 CMD ["user-service"]
