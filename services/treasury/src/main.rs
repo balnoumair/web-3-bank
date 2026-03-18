@@ -1,3 +1,4 @@
+mod cold_path;
 mod config;
 mod hot_path;
 mod pool_manager;
@@ -18,6 +19,7 @@ use sqlx::postgres::PgPoolOptions;
 use tonic::transport::Server;
 use tracing::info;
 
+use crate::cold_path::ColdPath;
 use crate::config::Config;
 use crate::hot_path::HotPath;
 use crate::pool_manager::PoolManager;
@@ -68,11 +70,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let hot_path = HotPath::new(pool.clone(), Arc::clone(&cfg), http.clone());
     let pool_manager = PoolManager::new(pool.clone(), Arc::clone(&cfg), http.clone());
     let watcher = Watcher::new(pool.clone(), Arc::clone(&cfg), http.clone());
+    let cold_path = ColdPath::new(pool.clone(), Arc::clone(&cfg), http.clone());
 
     // ── 4. Spawn background tasks ─────────────────────────────────────────────
     Arc::clone(&hot_path).spawn_background();
     Arc::clone(&pool_manager).spawn_background();
     Arc::clone(&watcher).spawn_background();
+    Arc::clone(&cold_path).spawn_background();
 
     // ── 5. Bind gRPC server ───────────────────────────────────────────────────
     let addr: SocketAddr = format!("0.0.0.0:{}", cfg.grpc_port).parse()?;

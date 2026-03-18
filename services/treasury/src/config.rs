@@ -37,10 +37,45 @@ pub struct Config {
     /// Example: `{"84532":"https://alternative-sepolia.example.com"}`
     #[serde(default)]
     pub watcher_rpc_urls: Option<JsonMap<u64, String>>,
+
+    // ── Cold-path rebalancing ─────────────────────────────────────────────────
+
+    /// Minimum pool ratio in basis points (0–10 000) for any chain below which
+    /// rebalancing is triggered.  For example `2000` = 20 %.  Default: 2000.
+    #[serde(default = "default_cold_path_min_bps")]
+    pub cold_path_min_bps: u32,
+
+    /// Target pool ratio in basis points (0–10 000) to restore each chain to.
+    /// Set to `0` for equal distribution across all chains.  Default: 0.
+    #[serde(default)]
+    pub cold_path_target_bps: u32,
+
+    /// Maximum SyncUSD (in wei) that may be moved in a single rebalance
+    /// operation, expressed as a decimal string.  Empty string = no cap.
+    #[serde(default)]
+    pub cold_path_max_wei: String,
+
+    /// ETH (in wei) to include as `msg.value` in each rebalance transaction to
+    /// cover CCIP fees, expressed as a decimal string.  Default: "0".
+    #[serde(default)]
+    pub ccip_fee_wei: String,
+
+    /// How often (seconds) the cold-path monitor checks pool ratios.
+    /// Default: 60.
+    #[serde(default = "default_cold_path_poll_secs")]
+    pub cold_path_poll_secs: u64,
 }
 
 fn default_grpc_port() -> u16 {
     50051
+}
+
+fn default_cold_path_min_bps() -> u32 {
+    2000 // 20 %
+}
+
+fn default_cold_path_poll_secs() -> u64 {
+    60
 }
 
 impl Config {
