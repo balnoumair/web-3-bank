@@ -11,9 +11,6 @@ pub struct UserRow {
     pub updated_at: DateTime<Utc>,
 }
 
-/// Type alias kept for compatibility with other modules that reference `users::User`.
-pub type User = UserRow;
-
 pub async fn insert_user(pool: &PgPool, display_name: Option<&str>) -> Result<Uuid, sqlx::Error> {
     let name = display_name.unwrap_or("");
     let row = sqlx::query!(

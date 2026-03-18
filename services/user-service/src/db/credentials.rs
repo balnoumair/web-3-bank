@@ -24,7 +24,7 @@ pub async fn insert_credential(
 pub async fn get_user_by_address(
     pool: &PgPool,
     tempo_address: &str,
-) -> Result<Option<(crate::db::users::User, Credential)>, sqlx::Error> {
+) -> Result<Option<(crate::db::users::UserRow, Credential)>, sqlx::Error> {
     todo!()
 }
 
