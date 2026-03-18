@@ -4,5 +4,9 @@ out = "out"
 test = "test"
 libs = ["lib"]
 solc_version = "0.8.24"
+remappings = [
+  "@openzeppelin/contracts-upgradeable/=lib/openzeppelin-contracts-upgradeable/contracts/",
+  "@openzeppelin/contracts/=lib/openzeppelin-contracts-upgradeable/lib/openzeppelin-contracts/contracts/",
+]
 
 # See https://book.getfoundry.sh/reference/config/ for more options.
