@@ -1,1 +1,0 @@
-{"rustc":15497389221046826682,"features":"","declared_features":"","target":0,"profile":0,"path":0,"deps":[[16131952459645111191,"build_script_build",false,16067104392201722393]],"local":[{"RerunIfChanged":{"output":"debug/build/treasury-d8f3b9a233fbbbc5/output","paths":["proto/treasury.proto","proto"]}}],"rustflags":[],"config":0,"compile_kind":0}
