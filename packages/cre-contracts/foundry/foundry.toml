@@ -9,4 +9,16 @@ remappings = [
   "@openzeppelin/contracts/=lib/openzeppelin-contracts-upgradeable/lib/openzeppelin-contracts/contracts/",
 ]
 
+# ── RPC endpoints for deployment scripts ──────────────────────────────────────
+# Set the corresponding env vars in your .env file (see .env.example).
+[rpc_endpoints]
+base_sepolia      = "${BASE_SEPOLIA_RPC_URL}"
+arbitrum_sepolia  = "${ARBITRUM_SEPOLIA_RPC_URL}"
+local             = "${LOCAL_RPC_URL}"
+
+# ── Etherscan / block-explorer API keys for --verify ─────────────────────────
+[etherscan]
+base_sepolia     = { key = "${BASESCAN_API_KEY}", url = "https://api-sepolia.basescan.org/api" }
+arbitrum_sepolia = { key = "${ARBISCAN_API_KEY}",  url = "https://api-sepolia.arbiscan.io/api" }
+
 # See https://book.getfoundry.sh/reference/config/ for more options.
