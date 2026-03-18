@@ -100,7 +100,8 @@ contract SyncUSDTest is Test {
     // ── Pre-mint gate ───────────────────────────────────────────────────
 
     function test_mintRevertsBeforeMinterRoleGranted() public {
-        vm.prank(unauthorized);
+        // `minter` is the intended future minter but hasn't been granted the role yet
+        vm.prank(minter);
         vm.expectRevert();
         token.mint(user, 100e6);
     }
@@ -211,6 +212,21 @@ contract SyncUSDTest is Test {
         assertFalse(token.paused());
     }
 
+    function test_pauseRevertsForUnauthorized() public {
+        vm.prank(unauthorized);
+        vm.expectRevert();
+        token.pause();
+    }
+
+    function test_unpauseRevertsForUnauthorized() public {
+        vm.prank(pauser);
+        token.pause();
+
+        vm.prank(unauthorized);
+        vm.expectRevert();
+        token.unpause();
+    }
+
     function test_transferRevertsWhenPaused() public {
         vm.prank(admin);
         token.grantRole(MINTER_ROLE, minter);
@@ -240,6 +256,15 @@ contract SyncUSDTest is Test {
         vm.prank(unauthorized);
         vm.expectRevert();
         token.transferFrom(user, unauthorized, 10e6);
+    }
+
+    function test_approveRevertsWhenPaused() public {
+        vm.prank(pauser);
+        token.pause();
+
+        vm.prank(user);
+        vm.expectRevert();
+        token.approve(unauthorized, 50e6);
     }
 
     function test_mintRevertsWhenPaused() public {

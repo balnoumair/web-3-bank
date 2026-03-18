@@ -86,6 +86,18 @@ contract SyncUSD is
         return super.transferFrom(from, to, amount);
     }
 
+    /// @notice Approve is blocked when the contract is paused.
+    /// @dev Blocked so that no allowances can be pre-set during a pause that would
+    ///      immediately become exercisable on unpause, closing a front-running vector.
+    function approve(address spender, uint256 amount)
+        public
+        override(ERC20Upgradeable, IERC20)
+        whenNotPaused
+        returns (bool)
+    {
+        return super.approve(spender, amount);
+    }
+
     // ── IBurnMintERC20 ─────────────────────────────────────────────────
 
     /// @notice Mints `amount` tokens to `to`. Restricted to MINTER_ROLE.
