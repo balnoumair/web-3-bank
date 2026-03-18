@@ -1,4 +1,3 @@
-// services/treasury/proto/treasury.proto
 syntax = "proto3";
 package treasury;
 

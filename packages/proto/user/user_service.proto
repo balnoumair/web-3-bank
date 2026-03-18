@@ -1,5 +1,5 @@
 syntax = "proto3";
-package user.v1;
+package user;
 
 service UserService {
   rpc CreateUser(CreateUserRequest) returns (CreateUserResponse);
