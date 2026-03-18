@@ -62,7 +62,7 @@ pub async fn get_user_by_address(
         "SELECT u.id AS user_id, u.display_name, u.status, u.created_at
          FROM users.credentials c
          JOIN users.users u ON u.id = c.user_id
-         WHERE c.tempo_address = $1",
+         WHERE c.tempo_address = $1 AND c.revoked_at IS NULL",
         tempo_address,
     )
     .fetch_optional(pool)
@@ -121,8 +121,8 @@ pub async fn revoke_credential(
     .fetch_all(&mut *tx)
     .await?;
 
-    if active.len() <= 1 {
-        tx.rollback().await?;
+    if active.len() == 1 {
+        drop(tx);
         return Err(CredentialError::LastActiveCredential);
     }
 
@@ -137,7 +137,7 @@ pub async fn revoke_credential(
     .await?;
 
     if updated.rows_affected() == 0 {
-        tx.rollback().await?;
+        drop(tx);
         return Err(CredentialError::NotFound);
     }
 
@@ -174,8 +174,12 @@ mod tests {
         let user_id = insert_user(&pool, None).await.unwrap();
         let addr = "0xabcdef1234567890abcdef1234567890abcdef12";
         insert_credential(&pool, user_id, b"cred-1", b"pk", addr).await.unwrap();
-        let result = insert_credential(&pool, user_id, b"cred-2", b"pk", addr).await;
-        assert!(result.is_err());
+        let err = insert_credential(&pool, user_id, b"cred-2", b"pk", addr).await.unwrap_err();
+        // Postgres unique constraint violation (error code 23505)
+        assert!(matches!(err, CredentialError::Db(_)));
+        let db_err = match err { CredentialError::Db(e) => e, _ => panic!("expected Db error") };
+        let pg_err = db_err.as_database_error().expect("expected database error");
+        assert_eq!(pg_err.code().as_deref(), Some("23505"), "expected unique violation");
     }
 
     #[sqlx::test(migrations = "src/db/migrations")]
