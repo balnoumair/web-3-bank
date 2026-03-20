@@ -16,7 +16,7 @@ pub struct Config {
     /// Example: `{"84532":"https://sepolia.base.org"}`
     pub rpc_urls: JsonMap<u64, String>,
 
-    /// JSON map of chain_id → BankContract checksummed address string.
+    /// JSON map of chain_id → Bank contract checksummed address string.
     pub contract_addresses: JsonMap<u64, String>,
 
     /// RouteReceiver.sol address on Base Sepolia (checksummed hex string).

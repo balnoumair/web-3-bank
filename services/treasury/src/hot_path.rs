@@ -6,14 +6,15 @@
 //! `releaseHotPath` on the destination chain and records the outcome in
 //! `treasury.relay_logs`.
 //!
-//! # Assumed Bank Contract interface (not yet deployed)
+//! # Bank Contract interface (Bank.sol)
 //!
 //! Event:
-//!   `HotPathInitiated(address indexed sender, address indexed recipient,
-//!                     uint256 amount, uint64 destChainId, bytes32 eventId)`
+//!   `HotPathInitiated(address indexed sender, address indexed to,
+//!                     uint256 amount, uint256 destinationChainId,
+//!                     bytes32 eventHash, uint256 fee)`
 //!
 //! Write:
-//!   `releaseHotPath(address recipient, uint256 amount, bytes32 sourceEventId)`
+//!   `releaseHotPath(address to, uint256 amount, bytes32 sourceEventHash)`
 //!
 //! Read:
 //!   `poolDepth() returns (uint256)`
@@ -84,7 +85,7 @@ pub struct HotPath {
     relayer_address: Option<Address>,
     /// Per-chain nonce cache to avoid an extra RPC round-trip on each tx.
     nonce_cache: Arc<Mutex<HashMap<u64, u64>>>,
-    /// keccak256("HotPathInitiated(address,address,uint256,uint64,bytes32)")
+    /// keccak256("HotPathInitiated(address,address,uint256,uint256,bytes32,uint256)")
     hot_path_topic: B256,
     /// keccak256("ActivationPublished(string,string,string,uint256,string,string,uint256)")
     activation_topic: B256,
@@ -105,7 +106,7 @@ impl HotPath {
         let initial: HashSet<u64> = config.rpc_urls.keys().cloned().collect();
 
         let hot_path_topic =
-            keccak256(b"HotPathInitiated(address,address,uint256,uint64,bytes32)");
+            keccak256(b"HotPathInitiated(address,address,uint256,uint256,bytes32,uint256)");
         let activation_topic = keccak256(
             b"ActivationPublished(string,string,string,uint256,string,string,uint256)",
         );
@@ -753,8 +754,9 @@ impl HotPath {
     fn parse_hot_path_event(&self, log: &RpcLog, source_chain_id: u64) -> Option<HotPathEvent> {
         // topics[0] = event selector
         // topics[1] = indexed sender   (address, left-padded to 32 bytes)
-        // topics[2] = indexed recipient(address, left-padded to 32 bytes)
-        // data      = abi_encode(uint256 amount, uint64 destChainId, bytes32 eventId)
+        // topics[2] = indexed to       (address, left-padded to 32 bytes)
+        // data      = abi_encode(uint256 amount, uint256 destinationChainId,
+        //                        bytes32 eventHash, uint256 fee)
         if log.topics.len() < 3 {
             return None;
         }
@@ -769,15 +771,17 @@ impl HotPath {
         let recipient = Address::from_slice(&recipient_raw[12..32]);
 
         let data = decode_hex(&log.data)?;
-        if data.len() < 96 {
+        // 4 slots: amount (32) + destinationChainId (32) + eventHash (32) + fee (32)
+        if data.len() < 128 {
             return None;
         }
 
         let amount_bytes: [u8; 32] = data[0..32].try_into().ok()?;
         let amount = U256::from_be_bytes(amount_bytes);
-        // uint64 destChainId: right-aligned in its 32-byte slot (bytes 32..64).
+        // uint256 destinationChainId: right-aligned in its 32-byte slot (bytes 32..64).
         let dest_chain_id = u64::from_be_bytes(data[56..64].try_into().ok()?);
         let event_id = B256::from_slice(&data[64..96]);
+        // data[96..128] = fee (reserved, currently 0 — ignored)
 
         Some(HotPathEvent {
             source_chain_id,

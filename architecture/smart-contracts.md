@@ -51,7 +51,11 @@ The Bank Contract acts as a non-custodial gateway and liquidity provider for `Sy
 
 #### `releaseHotPath(address to, uint256 amount, bytes32 sourceEventHash)`
 - **Action:** Called by the Treasury relayer on the destination chain to complete a hot path transfer.
-- **Execution:** Releases `amount` of `SyncUSD` from the local pool to `to`. Restricted to `RELAYER_ROLE`. Emits a `HotPathReleased` event with `sourceEventHash` for cross-chain verification.
+- **Execution:** Releases `amount` of `SyncUSD` from the local pool to `to`. Restricted to `RELAYER_ROLE`. Each `sourceEventHash` may only be released once (idempotency guard). Emits a `HotPathReleased` event with `sourceEventHash` for cross-chain verification.
+
+#### `poolDepth() returns (uint256)`
+- **Action:** View function returning the SyncUSD balance held in this Bank's liquidity pool.
+- **Usage:** Called by the Treasury Service's pool management module to monitor pool depths across chains.
 
 *(Note: If both users are on the same chain, they just execute a standard `transfer()` of the `SyncUSD` token. No Bank Contract interaction is required).*
 
