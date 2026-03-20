@@ -60,7 +60,10 @@ mod tests {
     #[sqlx::test(migrations = "src/db/migrations")]
     async fn test_insert_user_default_display_name(pool: PgPool) {
         let id = insert_user(&pool, None).await.unwrap();
-        let row = get_user_by_id(&pool, id).await.unwrap().expect("user should exist");
+        let row = get_user_by_id(&pool, id)
+            .await
+            .unwrap()
+            .expect("user should exist");
         assert_eq!(row.display_name, "");
         assert_eq!(row.status, "active");
     }
@@ -68,7 +71,10 @@ mod tests {
     #[sqlx::test(migrations = "src/db/migrations")]
     async fn test_insert_user_with_display_name(pool: PgPool) {
         let id = insert_user(&pool, Some("Alice")).await.unwrap();
-        let row = get_user_by_id(&pool, id).await.unwrap().expect("user should exist");
+        let row = get_user_by_id(&pool, id)
+            .await
+            .unwrap()
+            .expect("user should exist");
         assert_eq!(row.display_name, "Alice");
     }
 
@@ -82,7 +88,10 @@ mod tests {
     async fn test_update_display_name(pool: PgPool) {
         let id = insert_user(&pool, Some("Old Name")).await.unwrap();
         update_display_name(&pool, id, "New Name").await.unwrap();
-        let row = get_user_by_id(&pool, id).await.unwrap().expect("user should exist");
+        let row = get_user_by_id(&pool, id)
+            .await
+            .unwrap()
+            .expect("user should exist");
         assert_eq!(row.display_name, "New Name");
     }
 }

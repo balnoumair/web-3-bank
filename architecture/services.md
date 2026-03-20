@@ -105,9 +105,9 @@ The Treasury Service is the operational backbone — it moves funds across chain
 |---|---|
 | **Runtime** | TypeScript/Bun (Chainlink CRE SDK) |
 | **Database** | None (on-chain state via `RouteReceiver.sol`) |
-| **Repository** | Separate repo — already ~80% complete |
+| **Location** | `apps/cre-workflows/`, `apps/cre-runtime/`, `packages/cre-config/` |
 
-The CRE Orchestrator is an existing, standalone service that scores blockchain health and publishes results on-chain. It does **not** route individual transfers or interact with the Treasury Service directly.
+The CRE Orchestrator scores blockchain health and publishes results on-chain. It does **not** route individual transfers or interact with the Treasury Service directly.
 
 ### What It Does
 - **Scores chains** on 4 metrics: Fee (35%), Latency (30%), Reliability (25%), Liquidity (10%)

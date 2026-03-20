@@ -31,6 +31,7 @@ contract Bank is
     error ZeroAddress();
     error ZeroAmount();
     error InsufficientPoolLiquidity();
+    error TransferAlreadyReleased(bytes32 sourceEventHash);
 
     // ── Roles ──────────────────────────────────────────────────────────
 
@@ -74,6 +75,9 @@ contract Bank is
 
     /// @dev Monotonic counter used to ensure unique event hashes across transfers.
     uint256 private _nonce;
+
+    /// @notice sourceEventHash → true once releaseHotPath has been executed (idempotency guard).
+    mapping(bytes32 => bool) public released;
 
     // ── Constructor ────────────────────────────────────────────────────
 
@@ -169,12 +173,19 @@ contract Bank is
     {
         if (to == address(0)) revert ZeroAddress();
         if (amount == 0) revert ZeroAmount();
+        if (released[sourceEventHash]) revert TransferAlreadyReleased(sourceEventHash);
         if (IERC20(address(syncUSD)).balanceOf(address(this)) < amount) {
             revert InsufficientPoolLiquidity();
         }
 
+        released[sourceEventHash] = true;
         IERC20(address(syncUSD)).safeTransfer(to, amount);
         emit HotPathReleased(to, amount, sourceEventHash);
+    }
+
+    /// @notice Returns the SyncUSD balance held in this pool, available for hot-path releases.
+    function poolDepth() external view returns (uint256) {
+        return IERC20(address(syncUSD)).balanceOf(address(this));
     }
 
     // ── Admin ──────────────────────────────────────────────────────────

@@ -6,14 +6,15 @@
 //! `releaseHotPath` on the destination chain and records the outcome in
 //! `treasury.relay_logs`.
 //!
-//! # Assumed Bank Contract interface (not yet deployed)
+//! # Bank Contract interface (Bank.sol)
 //!
 //! Event:
-//!   `HotPathInitiated(address indexed sender, address indexed recipient,
-//!                     uint256 amount, uint64 destChainId, bytes32 eventId)`
+//!   `HotPathInitiated(address indexed sender, address indexed to,
+//!                     uint256 amount, uint256 destinationChainId,
+//!                     bytes32 eventHash, uint256 fee)`
 //!
 //! Write:
-//!   `releaseHotPath(address recipient, uint256 amount, bytes32 sourceEventId)`
+//!   `releaseHotPath(address to, uint256 amount, bytes32 sourceEventHash)`
 //!
 //! Read:
 //!   `poolDepth() returns (uint256)`
@@ -84,7 +85,7 @@ pub struct HotPath {
     relayer_address: Option<Address>,
     /// Per-chain nonce cache to avoid an extra RPC round-trip on each tx.
     nonce_cache: Arc<Mutex<HashMap<u64, u64>>>,
-    /// keccak256("HotPathInitiated(address,address,uint256,uint64,bytes32)")
+    /// keccak256("HotPathInitiated(address,address,uint256,uint256,bytes32,uint256)")
     hot_path_topic: B256,
     /// keccak256("ActivationPublished(string,string,string,uint256,string,string,uint256)")
     activation_topic: B256,
@@ -105,10 +106,9 @@ impl HotPath {
         let initial: HashSet<u64> = config.rpc_urls.keys().cloned().collect();
 
         let hot_path_topic =
-            keccak256(b"HotPathInitiated(address,address,uint256,uint64,bytes32)");
-        let activation_topic = keccak256(
-            b"ActivationPublished(string,string,string,uint256,string,string,uint256)",
-        );
+            keccak256(b"HotPathInitiated(address,address,uint256,uint256,bytes32,uint256)");
+        let activation_topic =
+            keccak256(b"ActivationPublished(string,string,string,uint256,string,string,uint256)");
 
         let release_hash = keccak256(b"releaseHotPath(address,uint256,bytes32)");
         let pool_depth_hash = keccak256(b"poolDepth()");
@@ -147,13 +147,12 @@ impl HotPath {
         req: Request<GetRelayStatusRequest>,
     ) -> Result<Response<GetRelayStatusResponse>, Status> {
         let hash = req.into_inner().source_event_hash;
-        let row = sqlx::query(
-            "SELECT status FROM treasury.relay_logs WHERE source_event_hash = $1",
-        )
-        .bind(&hash)
-        .fetch_optional(&self.pool)
-        .await
-        .map_err(|e| Status::internal(e.to_string()))?;
+        let row =
+            sqlx::query("SELECT status FROM treasury.relay_logs WHERE source_event_hash = $1")
+                .bind(&hash)
+                .fetch_optional(&self.pool)
+                .await
+                .map_err(|e| Status::internal(e.to_string()))?;
 
         match row {
             Some(r) => {
@@ -249,7 +248,11 @@ impl HotPath {
                 }
             };
 
-            let scan_from = if last_block == 0 { to_block } else { last_block };
+            let scan_from = if last_block == 0 {
+                to_block
+            } else {
+                last_block
+            };
 
             let logs = self
                 .fetch_logs(
@@ -302,7 +305,10 @@ impl HotPath {
         let dest_rpc = match self.config.rpc_urls.get(&event.dest_chain_id) {
             Some(u) => u.clone(),
             None => {
-                warn!(chain = event.dest_chain_id, "hot_path: no RPC for dest chain");
+                warn!(
+                    chain = event.dest_chain_id,
+                    "hot_path: no RPC for dest chain"
+                );
                 return;
             }
         };
@@ -436,8 +442,13 @@ impl HotPath {
 
         // EIP-1559 signing payload: 0x02 || rlp([chain_id, nonce, ...])
         let signing_rlp = build_tx_rlp(
-            chain_id, nonce, max_priority_fee, max_fee, gas_limit,
-            &bank_addr_bytes, &call_data,
+            chain_id,
+            nonce,
+            max_priority_fee,
+            max_fee,
+            gas_limit,
+            &bank_addr_bytes,
+            &call_data,
         );
         let mut to_sign = vec![0x02u8];
         to_sign.extend_from_slice(&signing_rlp);
@@ -517,13 +528,7 @@ impl HotPath {
             }],
             "id": 1
         });
-        let resp: serde_json::Value = match self
-            .http
-            .post(rpc_url)
-            .json(&body)
-            .send()
-            .await
-        {
+        let resp: serde_json::Value = match self.http.post(rpc_url).json(&body).send().await {
             Ok(r) => match r.json().await {
                 Ok(v) => v,
                 Err(_) => return vec![],
@@ -607,8 +612,8 @@ impl HotPath {
             .await
             .map_err(|e| e.to_string())?;
         let hex = resp["result"].as_str().ok_or("missing gasPrice")?;
-        let gp = u64::from_str_radix(hex.trim_start_matches("0x"), 16)
-            .map_err(|e| e.to_string())?;
+        let gp =
+            u64::from_str_radix(hex.trim_start_matches("0x"), 16).map_err(|e| e.to_string())?;
         let tip = gp / 10;
         Ok((gp + tip, tip)) // (maxFeePerGas, maxPriorityFeePerGas)
     }
@@ -664,9 +669,7 @@ impl HotPath {
             if let Some(receipt) = resp["result"].as_object() {
                 match receipt.get("status").and_then(|s| s.as_str()) {
                     Some("0x1") => return Ok(()),
-                    Some("0x0") => {
-                        return Err(format!("transaction reverted: {}", tx_hash))
-                    }
+                    Some("0x0") => return Err(format!("transaction reverted: {}", tx_hash)),
                     _ => {}
                 }
             }
@@ -677,14 +680,12 @@ impl HotPath {
     // ── Database helpers ──────────────────────────────────────────────────────
 
     async fn relay_already_recorded(&self, source_event_hash: &str) -> bool {
-        sqlx::query(
-            "SELECT 1 FROM treasury.relay_logs WHERE source_event_hash = $1",
-        )
-        .bind(source_event_hash)
-        .fetch_optional(&self.pool)
-        .await
-        .map(|r| r.is_some())
-        .unwrap_or(false)
+        sqlx::query("SELECT 1 FROM treasury.relay_logs WHERE source_event_hash = $1")
+            .bind(source_event_hash)
+            .fetch_optional(&self.pool)
+            .await
+            .map(|r| r.is_some())
+            .unwrap_or(false)
     }
 
     async fn insert_relay_log(
@@ -753,8 +754,9 @@ impl HotPath {
     fn parse_hot_path_event(&self, log: &RpcLog, source_chain_id: u64) -> Option<HotPathEvent> {
         // topics[0] = event selector
         // topics[1] = indexed sender   (address, left-padded to 32 bytes)
-        // topics[2] = indexed recipient(address, left-padded to 32 bytes)
-        // data      = abi_encode(uint256 amount, uint64 destChainId, bytes32 eventId)
+        // topics[2] = indexed to       (address, left-padded to 32 bytes)
+        // data      = abi_encode(uint256 amount, uint256 destinationChainId,
+        //                        bytes32 eventHash, uint256 fee)
         if log.topics.len() < 3 {
             return None;
         }
@@ -769,15 +771,17 @@ impl HotPath {
         let recipient = Address::from_slice(&recipient_raw[12..32]);
 
         let data = decode_hex(&log.data)?;
-        if data.len() < 96 {
+        // 4 slots: amount (32) + destinationChainId (32) + eventHash (32) + fee (32)
+        if data.len() < 128 {
             return None;
         }
 
         let amount_bytes: [u8; 32] = data[0..32].try_into().ok()?;
         let amount = U256::from_be_bytes(amount_bytes);
-        // uint64 destChainId: right-aligned in its 32-byte slot (bytes 32..64).
+        // uint256 destinationChainId: right-aligned in its 32-byte slot (bytes 32..64).
         let dest_chain_id = u64::from_be_bytes(data[56..64].try_into().ok()?);
         let event_id = B256::from_slice(&data[64..96]);
+        // data[96..128] = fee (reserved, currently 0 — ignored)
 
         Some(HotPathEvent {
             source_chain_id,

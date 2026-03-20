@@ -154,11 +154,20 @@ mod tests {
     #[sqlx::test(migrations = "src/db/migrations")]
     async fn test_insert_and_get_by_address(pool: PgPool) {
         let user_id = insert_user(&pool, Some("Alice")).await.unwrap();
-        insert_credential(&pool, user_id, b"cred-bytes", b"pk-bytes",
-            "0xabcdef1234567890abcdef1234567890abcdef12").await.unwrap();
+        insert_credential(
+            &pool,
+            user_id,
+            b"cred-bytes",
+            b"pk-bytes",
+            "0xabcdef1234567890abcdef1234567890abcdef12",
+        )
+        .await
+        .unwrap();
 
         let row = get_user_by_address(&pool, "0xabcdef1234567890abcdef1234567890abcdef12")
-            .await.unwrap().expect("should find user");
+            .await
+            .unwrap()
+            .expect("should find user");
         assert_eq!(row.user_id, user_id);
         assert_eq!(row.display_name, "Alice");
     }
@@ -166,7 +175,8 @@ mod tests {
     #[sqlx::test(migrations = "src/db/migrations")]
     async fn test_get_user_by_address_not_found(pool: PgPool) {
         let result = get_user_by_address(&pool, "0x0000000000000000000000000000000000000000")
-            .await.unwrap();
+            .await
+            .unwrap();
         assert!(result.is_none());
     }
 
@@ -174,13 +184,24 @@ mod tests {
     async fn test_duplicate_address_rejected(pool: PgPool) {
         let user_id = insert_user(&pool, None).await.unwrap();
         let addr = "0xabcdef1234567890abcdef1234567890abcdef12";
-        insert_credential(&pool, user_id, b"cred-1", b"pk", addr).await.unwrap();
-        let err = insert_credential(&pool, user_id, b"cred-2", b"pk", addr).await.unwrap_err();
+        insert_credential(&pool, user_id, b"cred-1", b"pk", addr)
+            .await
+            .unwrap();
+        let err = insert_credential(&pool, user_id, b"cred-2", b"pk", addr)
+            .await
+            .unwrap_err();
         // Postgres unique constraint violation (error code 23505)
         assert!(matches!(err, CredentialError::Db(_)));
-        let db_err = match err { CredentialError::Db(e) => e, _ => panic!("expected Db error") };
+        let db_err = match err {
+            CredentialError::Db(e) => e,
+            _ => panic!("expected Db error"),
+        };
         let pg_err = db_err.as_database_error().expect("expected database error");
-        assert_eq!(pg_err.code().as_deref(), Some("23505"), "expected unique violation");
+        assert_eq!(
+            pg_err.code().as_deref(),
+            Some("23505"),
+            "expected unique violation"
+        );
     }
 
     #[sqlx::test(migrations = "src/db/migrations")]
@@ -188,8 +209,12 @@ mod tests {
         let user_id = insert_user(&pool, None).await.unwrap();
         let addr1 = "0xaaaa111111111111111111111111111111111111";
         let addr2 = "0xbbbb222222222222222222222222222222222222";
-        insert_credential(&pool, user_id, b"cred1", b"pk1", addr1).await.unwrap();
-        insert_credential(&pool, user_id, b"cred2", b"pk2", addr2).await.unwrap();
+        insert_credential(&pool, user_id, b"cred1", b"pk1", addr1)
+            .await
+            .unwrap();
+        insert_credential(&pool, user_id, b"cred2", b"pk2", addr2)
+            .await
+            .unwrap();
 
         revoke_credential(&pool, user_id, b"cred1").await.unwrap();
 
@@ -204,20 +229,43 @@ mod tests {
     #[sqlx::test(migrations = "src/db/migrations")]
     async fn test_revoke_last_credential_fails(pool: PgPool) {
         let user_id = insert_user(&pool, None).await.unwrap();
-        insert_credential(&pool, user_id, b"only-cred", b"pk",
-            "0xcccc333333333333333333333333333333333333").await.unwrap();
+        insert_credential(
+            &pool,
+            user_id,
+            b"only-cred",
+            b"pk",
+            "0xcccc333333333333333333333333333333333333",
+        )
+        .await
+        .unwrap();
 
-        let err = revoke_credential(&pool, user_id, b"only-cred").await.unwrap_err();
+        let err = revoke_credential(&pool, user_id, b"only-cred")
+            .await
+            .unwrap_err();
         assert!(matches!(err, CredentialError::LastActiveCredential));
     }
 
     #[sqlx::test(migrations = "src/db/migrations")]
     async fn test_revoke_nonexistent_credential_fails(pool: PgPool) {
         let user_id = insert_user(&pool, None).await.unwrap();
-        insert_credential(&pool, user_id, b"cred1", b"pk1",
-            "0xaaaa111111111111111111111111111111111111").await.unwrap();
-        insert_credential(&pool, user_id, b"cred2", b"pk2",
-            "0xbbbb222222222222222222222222222222222222").await.unwrap();
+        insert_credential(
+            &pool,
+            user_id,
+            b"cred1",
+            b"pk1",
+            "0xaaaa111111111111111111111111111111111111",
+        )
+        .await
+        .unwrap();
+        insert_credential(
+            &pool,
+            user_id,
+            b"cred2",
+            b"pk2",
+            "0xbbbb222222222222222222222222222222222222",
+        )
+        .await
+        .unwrap();
 
         let result = revoke_credential(&pool, user_id, b"nonexistent").await;
         assert!(matches!(result.unwrap_err(), CredentialError::NotFound));

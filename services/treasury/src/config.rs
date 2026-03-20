@@ -16,7 +16,7 @@ pub struct Config {
     /// Example: `{"84532":"https://sepolia.base.org"}`
     pub rpc_urls: JsonMap<u64, String>,
 
-    /// JSON map of chain_id → BankContract checksummed address string.
+    /// JSON map of chain_id → Bank contract checksummed address string.
     pub contract_addresses: JsonMap<u64, String>,
 
     /// RouteReceiver.sol address on Base Sepolia (checksummed hex string).
@@ -39,7 +39,6 @@ pub struct Config {
     pub watcher_rpc_urls: Option<JsonMap<u64, String>>,
 
     // ── Cold-path rebalancing ─────────────────────────────────────────────────
-
     /// Minimum pool ratio in basis points (0–10 000) for any chain below which
     /// rebalancing is triggered.  For example `2000` = 20 %.  Default: 2000.
     #[serde(default = "default_cold_path_min_bps")]
@@ -118,8 +117,7 @@ where
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
         // envy passes env var values as strings; parse the JSON string.
         let s = String::deserialize(d)?;
-        let map: HashMap<K, V> =
-            serde_json::from_str(&s).map_err(serde::de::Error::custom)?;
+        let map: HashMap<K, V> = serde_json::from_str(&s).map_err(serde::de::Error::custom)?;
         Ok(JsonMap(map))
     }
 }
@@ -132,13 +130,13 @@ mod tests {
     fn parses_json_map() {
         let json = r#"{"84532":"https://sepolia.base.org"}"#;
         let map: JsonMap<u64, String> =
-            serde_json::from_str(&format!("\"{}\"", json.replace('"', "\\\"")))
-                .unwrap_or_else(|_| {
+            serde_json::from_str(&format!("\"{}\"", json.replace('"', "\\\""))).unwrap_or_else(
+                |_| {
                     // Simulate what envy does: pass raw JSON string through our Deserialize impl
-                    let raw: HashMap<u64, String> =
-                        serde_json::from_str(json).unwrap();
+                    let raw: HashMap<u64, String> = serde_json::from_str(json).unwrap();
                     JsonMap(raw)
-                });
+                },
+            );
         assert_eq!(map.get(&84532).unwrap(), "https://sepolia.base.org");
     }
 }

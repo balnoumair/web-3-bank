@@ -33,7 +33,8 @@ Across the entire web3Bank ecosystem, we design and build adhering strictly to t
 ## 4. CRE Route Orchestrator
 **Purpose:** Scores blockchain health and publishes chain rankings and activation states to the `RouteReceiver.sol` smart contract. The Treasury Service reads this on-chain state to make routing decisions — there is no direct communication between the two services.
 - **Language:** **TypeScript** (on **Bun** runtime)
-- **Rationale:** The CRE is an existing, ~80% complete service tightly coupled to the **Chainlink CRE SDK** (JS/TS-native, runs as WASM in the Chainlink DON). Rewriting in Rust would discard a functional codebase and lose SDK compatibility.
+- **Location:** `apps/cre-workflows/`, `apps/cre-runtime/`, `packages/cre-config/`
+- **Rationale:** The CRE is tightly coupled to the **Chainlink CRE SDK** (JS/TS-native, runs as WASM in the Chainlink DON). Rewriting in Rust would lose SDK compatibility.
 - **Key Packages:**
   - `@chainlink/cre-sdk`: CRE workflow runtime (DON consensus, cron triggers).
   - `zod`: Schema validation and type inference.

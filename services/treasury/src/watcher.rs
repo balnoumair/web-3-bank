@@ -100,12 +100,12 @@ pub struct Watcher {
     /// Per-chain nonce cache for pauser transactions.
     nonce_cache: Arc<Mutex<HashMap<u64, u64>>>,
     /// In-memory cache of HotPathInitiated events keyed by eventId.
-    /// eventId is the bytes32 that the relayer passes as `transferId` to
-    /// `hotPathRelease`, so it appears as `transferId` in HotPathReleased.
+    /// eventId is the bytes32 that the relayer passes as `sourceEventHash` to
+    /// `releaseHotPath`, so it appears as `sourceEventHash` in HotPathReleased.
     initiated_cache: Arc<RwLock<HashMap<B256, InitiatedEvent>>>,
-    /// keccak256("HotPathInitiated(address,address,uint256,uint64,bytes32)")
+    /// keccak256("HotPathInitiated(address,address,uint256,uint256,bytes32,uint256)")
     hot_path_initiated_topic: B256,
-    /// keccak256("HotPathReleased(bytes32,address,uint256)")
+    /// keccak256("HotPathReleased(address,uint256,bytes32)")
     hot_path_released_topic: B256,
     /// 4-byte selector for `pause()`
     pause_selector: [u8; 4],
@@ -124,8 +124,8 @@ impl Watcher {
         }
 
         let hot_path_initiated_topic =
-            keccak256(b"HotPathInitiated(address,address,uint256,uint64,bytes32)");
-        let hot_path_released_topic = keccak256(b"HotPathReleased(bytes32,address,uint256)");
+            keccak256(b"HotPathInitiated(address,address,uint256,uint256,bytes32,uint256)");
+        let hot_path_released_topic = keccak256(b"HotPathReleased(address,uint256,bytes32)");
 
         let pause_hash = keccak256(b"pause()");
         let mut pause_selector = [0u8; 4];
@@ -220,9 +220,7 @@ impl Watcher {
 
                 let mut cache = self.initiated_cache.write().await;
                 for log in &logs {
-                    if let Some((event_id, event)) =
-                        self.parse_initiated_event(log, chain_id)
-                    {
+                    if let Some((event_id, event)) = self.parse_initiated_event(log, chain_id) {
                         cache.insert(event_id, event);
                     }
                 }
@@ -378,7 +376,8 @@ impl Watcher {
             }
         };
 
-        self.insert_alert(&transfer_id_hex, alert_type, &detail).await;
+        self.insert_alert(&transfer_id_hex, alert_type, &detail)
+            .await;
     }
 
     /// Submit `pause()` on the Bank Contract for the release's destination
@@ -540,13 +539,7 @@ impl Watcher {
             }],
             "id": 1
         });
-        let resp: serde_json::Value = match self
-            .http
-            .post(rpc_url)
-            .json(&body)
-            .send()
-            .await
-        {
+        let resp: serde_json::Value = match self.http.post(rpc_url).json(&body).send().await {
             Ok(r) => match r.json().await {
                 Ok(v) => v,
                 Err(_) => return vec![],
@@ -604,8 +597,8 @@ impl Watcher {
             .await
             .map_err(|e| e.to_string())?;
         let hex = resp["result"].as_str().ok_or("missing gasPrice")?;
-        let gp = u64::from_str_radix(hex.trim_start_matches("0x"), 16)
-            .map_err(|e| e.to_string())?;
+        let gp =
+            u64::from_str_radix(hex.trim_start_matches("0x"), 16).map_err(|e| e.to_string())?;
         let tip = gp / 10;
         Ok((gp + tip, tip)) // (maxFeePerGas, maxPriorityFeePerGas)
     }
@@ -675,14 +668,12 @@ impl Watcher {
 
     /// Returns true if a watcher alert already exists for this transferId.
     async fn already_verified(&self, transfer_id_hex: &str) -> bool {
-        sqlx::query(
-            "SELECT 1 FROM treasury.watcher_alerts WHERE source_event_hash = $1",
-        )
-        .bind(transfer_id_hex)
-        .fetch_optional(&self.pool)
-        .await
-        .map(|r| r.is_some())
-        .unwrap_or(false)
+        sqlx::query("SELECT 1 FROM treasury.watcher_alerts WHERE source_event_hash = $1")
+            .bind(transfer_id_hex)
+            .fetch_optional(&self.pool)
+            .await
+            .map(|r| r.is_some())
+            .unwrap_or(false)
     }
 
     /// Persist a verification result.  The unique index on `source_event_hash`
@@ -709,17 +700,14 @@ impl Watcher {
 
     /// Parse a `HotPathInitiated` log.
     ///
-    /// ABI layout:
+    /// ABI layout (Bank.sol):
     ///   topics[0] = event selector
     ///   topics[1] = indexed sender   (address, left-padded to 32 bytes)
-    ///   topics[2] = indexed recipient(address, left-padded to 32 bytes)
-    ///   data      = abi_encode(uint256 amount, uint64 destChainId, bytes32 eventId)
-    ///                         [0..32]           [32..64]            [64..96]
-    fn parse_initiated_event(
-        &self,
-        log: &RpcLog,
-        chain_id: u64,
-    ) -> Option<(B256, InitiatedEvent)> {
+    ///   topics[2] = indexed to       (address, left-padded to 32 bytes)
+    ///   data      = abi_encode(uint256 amount, uint256 destinationChainId,
+    ///                          bytes32 eventHash, uint256 fee)
+    ///              [0..32]     [32..64]     [64..96]     [96..128]
+    fn parse_initiated_event(&self, log: &RpcLog, chain_id: u64) -> Option<(B256, InitiatedEvent)> {
         if log.topics.len() < 3 {
             return None;
         }
@@ -730,12 +718,13 @@ impl Watcher {
         let recipient = Address::from_slice(&recipient_raw[12..32]);
 
         let data = decode_hex(&log.data)?;
-        if data.len() < 96 {
+        // 4 slots: amount + destinationChainId + eventHash + fee
+        if data.len() < 128 {
             return None;
         }
         let amount_bytes: [u8; 32] = data[0..32].try_into().ok()?;
         let amount = U256::from_be_bytes(amount_bytes);
-        // eventId is the third 32-byte slot in data.
+        // eventHash is the third 32-byte slot in data.
         let event_id = B256::from_slice(&data[64..96]);
 
         Some((
@@ -751,26 +740,27 @@ impl Watcher {
 
     /// Parse a `HotPathReleased` log.
     ///
-    /// ABI layout:
+    /// ABI layout (Bank.sol):
     ///   topics[0] = event selector
-    ///   topics[1] = indexed transferId (bytes32)
-    ///   topics[2] = indexed recipient  (address, left-padded to 32 bytes)
+    ///   topics[1] = indexed to        (address, left-padded to 32 bytes)
+    ///   topics[2] = indexed sourceEventHash (bytes32)
     ///   data      = abi_encode(uint256 amount)
     fn parse_released_event(&self, log: &RpcLog, chain_id: u64) -> Option<ReleasedEvent> {
         if log.topics.len() < 3 {
             return None;
         }
-        let transfer_id_raw = decode_hex(&log.topics[1])?;
-        if transfer_id_raw.len() < 32 {
-            return None;
-        }
-        let transfer_id = B256::from_slice(&transfer_id_raw[..32]);
 
-        let recipient_raw = decode_hex(&log.topics[2])?;
+        let recipient_raw = decode_hex(&log.topics[1])?;
         if recipient_raw.len() < 32 {
             return None;
         }
         let recipient = Address::from_slice(&recipient_raw[12..32]);
+
+        let transfer_id_raw = decode_hex(&log.topics[2])?;
+        if transfer_id_raw.len() < 32 {
+            return None;
+        }
+        let transfer_id = B256::from_slice(&transfer_id_raw[..32]);
 
         let data = decode_hex(&log.data)?;
         if data.len() < 32 {
