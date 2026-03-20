@@ -220,9 +220,7 @@ impl Watcher {
 
                 let mut cache = self.initiated_cache.write().await;
                 for log in &logs {
-                    if let Some((event_id, event)) =
-                        self.parse_initiated_event(log, chain_id)
-                    {
+                    if let Some((event_id, event)) = self.parse_initiated_event(log, chain_id) {
                         cache.insert(event_id, event);
                     }
                 }
@@ -378,7 +376,8 @@ impl Watcher {
             }
         };
 
-        self.insert_alert(&transfer_id_hex, alert_type, &detail).await;
+        self.insert_alert(&transfer_id_hex, alert_type, &detail)
+            .await;
     }
 
     /// Submit `pause()` on the Bank Contract for the release's destination
@@ -540,13 +539,7 @@ impl Watcher {
             }],
             "id": 1
         });
-        let resp: serde_json::Value = match self
-            .http
-            .post(rpc_url)
-            .json(&body)
-            .send()
-            .await
-        {
+        let resp: serde_json::Value = match self.http.post(rpc_url).json(&body).send().await {
             Ok(r) => match r.json().await {
                 Ok(v) => v,
                 Err(_) => return vec![],
@@ -604,8 +597,8 @@ impl Watcher {
             .await
             .map_err(|e| e.to_string())?;
         let hex = resp["result"].as_str().ok_or("missing gasPrice")?;
-        let gp = u64::from_str_radix(hex.trim_start_matches("0x"), 16)
-            .map_err(|e| e.to_string())?;
+        let gp =
+            u64::from_str_radix(hex.trim_start_matches("0x"), 16).map_err(|e| e.to_string())?;
         let tip = gp / 10;
         Ok((gp + tip, tip)) // (maxFeePerGas, maxPriorityFeePerGas)
     }
@@ -675,14 +668,12 @@ impl Watcher {
 
     /// Returns true if a watcher alert already exists for this transferId.
     async fn already_verified(&self, transfer_id_hex: &str) -> bool {
-        sqlx::query(
-            "SELECT 1 FROM treasury.watcher_alerts WHERE source_event_hash = $1",
-        )
-        .bind(transfer_id_hex)
-        .fetch_optional(&self.pool)
-        .await
-        .map(|r| r.is_some())
-        .unwrap_or(false)
+        sqlx::query("SELECT 1 FROM treasury.watcher_alerts WHERE source_event_hash = $1")
+            .bind(transfer_id_hex)
+            .fetch_optional(&self.pool)
+            .await
+            .map(|r| r.is_some())
+            .unwrap_or(false)
     }
 
     /// Persist a verification result.  The unique index on `source_event_hash`
@@ -716,11 +707,7 @@ impl Watcher {
     ///   data      = abi_encode(uint256 amount, uint256 destinationChainId,
     ///                          bytes32 eventHash, uint256 fee)
     ///              [0..32]     [32..64]     [64..96]     [96..128]
-    fn parse_initiated_event(
-        &self,
-        log: &RpcLog,
-        chain_id: u64,
-    ) -> Option<(B256, InitiatedEvent)> {
+    fn parse_initiated_event(&self, log: &RpcLog, chain_id: u64) -> Option<(B256, InitiatedEvent)> {
         if log.topics.len() < 3 {
             return None;
         }

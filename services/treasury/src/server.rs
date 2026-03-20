@@ -8,10 +8,9 @@ use tracing::info;
 use crate::hot_path::HotPath;
 use crate::pool_manager::PoolManager;
 use crate::proto::treasury::{
-    health_check_response, treasury_service_server::TreasuryService,
-    GetPoolDepthRequest, GetPoolDepthResponse, GetRelayStatusRequest,
-    GetRelayStatusResponse, GetWatcherAlertsRequest, GetWatcherAlertsResponse,
-    HealthCheckRequest, HealthCheckResponse,
+    health_check_response, treasury_service_server::TreasuryService, GetPoolDepthRequest,
+    GetPoolDepthResponse, GetRelayStatusRequest, GetRelayStatusResponse, GetWatcherAlertsRequest,
+    GetWatcherAlertsResponse, HealthCheckRequest, HealthCheckResponse,
 };
 use crate::watcher::Watcher;
 
@@ -32,10 +31,7 @@ impl TreasuryService for TreasuryServer {
         &self,
         _req: Request<HealthCheckRequest>,
     ) -> Result<Response<HealthCheckResponse>, Status> {
-        let db_connected = sqlx::query("SELECT 1")
-            .execute(&self.pool)
-            .await
-            .is_ok();
+        let db_connected = sqlx::query("SELECT 1").execute(&self.pool).await.is_ok();
 
         let status = if db_connected && self.rpc_reachable && self.relayer_key_loaded {
             health_check_response::Status::Serving

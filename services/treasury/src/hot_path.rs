@@ -107,9 +107,8 @@ impl HotPath {
 
         let hot_path_topic =
             keccak256(b"HotPathInitiated(address,address,uint256,uint256,bytes32,uint256)");
-        let activation_topic = keccak256(
-            b"ActivationPublished(string,string,string,uint256,string,string,uint256)",
-        );
+        let activation_topic =
+            keccak256(b"ActivationPublished(string,string,string,uint256,string,string,uint256)");
 
         let release_hash = keccak256(b"releaseHotPath(address,uint256,bytes32)");
         let pool_depth_hash = keccak256(b"poolDepth()");
@@ -148,13 +147,12 @@ impl HotPath {
         req: Request<GetRelayStatusRequest>,
     ) -> Result<Response<GetRelayStatusResponse>, Status> {
         let hash = req.into_inner().source_event_hash;
-        let row = sqlx::query(
-            "SELECT status FROM treasury.relay_logs WHERE source_event_hash = $1",
-        )
-        .bind(&hash)
-        .fetch_optional(&self.pool)
-        .await
-        .map_err(|e| Status::internal(e.to_string()))?;
+        let row =
+            sqlx::query("SELECT status FROM treasury.relay_logs WHERE source_event_hash = $1")
+                .bind(&hash)
+                .fetch_optional(&self.pool)
+                .await
+                .map_err(|e| Status::internal(e.to_string()))?;
 
         match row {
             Some(r) => {
@@ -250,7 +248,11 @@ impl HotPath {
                 }
             };
 
-            let scan_from = if last_block == 0 { to_block } else { last_block };
+            let scan_from = if last_block == 0 {
+                to_block
+            } else {
+                last_block
+            };
 
             let logs = self
                 .fetch_logs(
@@ -303,7 +305,10 @@ impl HotPath {
         let dest_rpc = match self.config.rpc_urls.get(&event.dest_chain_id) {
             Some(u) => u.clone(),
             None => {
-                warn!(chain = event.dest_chain_id, "hot_path: no RPC for dest chain");
+                warn!(
+                    chain = event.dest_chain_id,
+                    "hot_path: no RPC for dest chain"
+                );
                 return;
             }
         };
@@ -437,8 +442,13 @@ impl HotPath {
 
         // EIP-1559 signing payload: 0x02 || rlp([chain_id, nonce, ...])
         let signing_rlp = build_tx_rlp(
-            chain_id, nonce, max_priority_fee, max_fee, gas_limit,
-            &bank_addr_bytes, &call_data,
+            chain_id,
+            nonce,
+            max_priority_fee,
+            max_fee,
+            gas_limit,
+            &bank_addr_bytes,
+            &call_data,
         );
         let mut to_sign = vec![0x02u8];
         to_sign.extend_from_slice(&signing_rlp);
@@ -518,13 +528,7 @@ impl HotPath {
             }],
             "id": 1
         });
-        let resp: serde_json::Value = match self
-            .http
-            .post(rpc_url)
-            .json(&body)
-            .send()
-            .await
-        {
+        let resp: serde_json::Value = match self.http.post(rpc_url).json(&body).send().await {
             Ok(r) => match r.json().await {
                 Ok(v) => v,
                 Err(_) => return vec![],
@@ -608,8 +612,8 @@ impl HotPath {
             .await
             .map_err(|e| e.to_string())?;
         let hex = resp["result"].as_str().ok_or("missing gasPrice")?;
-        let gp = u64::from_str_radix(hex.trim_start_matches("0x"), 16)
-            .map_err(|e| e.to_string())?;
+        let gp =
+            u64::from_str_radix(hex.trim_start_matches("0x"), 16).map_err(|e| e.to_string())?;
         let tip = gp / 10;
         Ok((gp + tip, tip)) // (maxFeePerGas, maxPriorityFeePerGas)
     }
@@ -665,9 +669,7 @@ impl HotPath {
             if let Some(receipt) = resp["result"].as_object() {
                 match receipt.get("status").and_then(|s| s.as_str()) {
                     Some("0x1") => return Ok(()),
-                    Some("0x0") => {
-                        return Err(format!("transaction reverted: {}", tx_hash))
-                    }
+                    Some("0x0") => return Err(format!("transaction reverted: {}", tx_hash)),
                     _ => {}
                 }
             }
@@ -678,14 +680,12 @@ impl HotPath {
     // ── Database helpers ──────────────────────────────────────────────────────
 
     async fn relay_already_recorded(&self, source_event_hash: &str) -> bool {
-        sqlx::query(
-            "SELECT 1 FROM treasury.relay_logs WHERE source_event_hash = $1",
-        )
-        .bind(source_event_hash)
-        .fetch_optional(&self.pool)
-        .await
-        .map(|r| r.is_some())
-        .unwrap_or(false)
+        sqlx::query("SELECT 1 FROM treasury.relay_logs WHERE source_event_hash = $1")
+            .bind(source_event_hash)
+            .fetch_optional(&self.pool)
+            .await
+            .map(|r| r.is_some())
+            .unwrap_or(false)
     }
 
     async fn insert_relay_log(

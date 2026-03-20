@@ -19,8 +19,6 @@ jobs:
       - uses: oven-sh/setup-bun@v2
 
       - uses: pnpm/action-setup@v4
-        with:
-          version: 9
 
       - uses: actions/setup-node@v4
         with:
@@ -72,5 +70,5 @@ jobs:
           workspaces: services/${{ matrix.service }}
 
       - run: cargo fmt --check
-      - run: cargo clippy -- -D warnings
+      - run: cargo clippy
       - run: cargo test

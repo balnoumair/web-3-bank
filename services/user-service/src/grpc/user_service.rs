@@ -45,7 +45,11 @@ impl UserService for UserServiceImpl {
             ));
         }
 
-        let mut tx = self.pool.begin().await.map_err(|e| Status::internal(e.to_string()))?;
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .map_err(|e| Status::internal(e.to_string()))?;
 
         let name = req.display_name.as_deref().unwrap_or("");
         let user_row = sqlx::query!(
@@ -73,13 +77,17 @@ impl UserService for UserServiceImpl {
             Err(e) => {
                 drop(tx); // auto-rollback
                 if pg_is_unique_violation(&e) {
-                    return Err(Status::already_exists("address or credential already registered"));
+                    return Err(Status::already_exists(
+                        "address or credential already registered",
+                    ));
                 }
                 return Err(Status::internal(e.to_string()));
             }
         }
 
-        tx.commit().await.map_err(|e| Status::internal(e.to_string()))?;
+        tx.commit()
+            .await
+            .map_err(|e| Status::internal(e.to_string()))?;
 
         Ok(Response::new(CreateUserResponse {
             user_id: user_id.to_string(),
@@ -241,8 +249,8 @@ impl UserService for UserServiceImpl {
 mod tests {
     use super::*;
     use crate::grpc::{user_service_client::UserServiceClient, UserServiceServer};
-    use tonic::transport::Server;
     use tokio_stream::wrappers::TcpListenerStream;
+    use tonic::transport::Server;
 
     async fn start_test_server(pool: PgPool) -> String {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();

@@ -1,5 +1,5 @@
-pub mod users;
 pub mod credentials;
+pub mod users;
 
 use sqlx::PgPool;
 

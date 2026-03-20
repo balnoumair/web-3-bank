@@ -51,10 +51,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // ── 2. Startup checks (run concurrently) ─────────────────────────────────
     let http = reqwest::Client::new();
-    let (rpc_reachable, relayer_key_loaded) = tokio::join!(
-        check_rpc_reachable(&cfg.rpc_urls, &http),
-        async { check_relayer_key(&cfg.relayer_key_path) },
-    );
+    let (rpc_reachable, relayer_key_loaded) =
+        tokio::join!(check_rpc_reachable(&cfg.rpc_urls, &http), async {
+            check_relayer_key(&cfg.relayer_key_path)
+        },);
 
     if !rpc_reachable {
         tracing::warn!("startup: one or more RPC endpoints unreachable");

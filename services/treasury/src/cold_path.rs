@@ -99,9 +99,8 @@ impl ColdPath {
         let mut rebalance_selector = [0u8; 4];
         rebalance_selector.copy_from_slice(&rebalance_hash[..4]);
 
-        let activation_topic = keccak256(
-            b"ActivationPublished(string,string,string,uint256,string,string,uint256)",
-        );
+        let activation_topic =
+            keccak256(b"ActivationPublished(string,string,string,uint256,string,string,uint256)");
 
         let max_wei_per_op = if config.cold_path_max_wei.is_empty() {
             None
@@ -118,10 +117,7 @@ impl ColdPath {
             }
         };
 
-        let ccip_fee_wei = config
-            .ccip_fee_wei
-            .parse::<U256>()
-            .unwrap_or(U256::ZERO);
+        let ccip_fee_wei = config.ccip_fee_wei.parse::<U256>().unwrap_or(U256::ZERO);
 
         let poll_interval = Duration::from_secs(config.cold_path_poll_secs);
 
@@ -187,7 +183,11 @@ impl ColdPath {
                 }
             };
 
-            let scan_from = if last_block == 0 { to_block } else { last_block };
+            let scan_from = if last_block == 0 {
+                to_block
+            } else {
+                last_block
+            };
             let scan_from = scan_from.max(to_block.saturating_sub(MAX_BLOCK_RANGE));
 
             let logs = self
@@ -345,7 +345,10 @@ impl ColdPath {
                     continue;
                 }
                 None => {
-                    warn!(source_chain, "cold_path: could not re-verify source depth — skipping");
+                    warn!(
+                        source_chain,
+                        "cold_path: could not re-verify source depth — skipping"
+                    );
                     continue;
                 }
             }
@@ -354,8 +357,7 @@ impl ColdPath {
             if self.op_in_flight(source_chain, dest_chain).await {
                 info!(
                     source_chain,
-                    dest_chain,
-                    "cold_path: in-flight op exists — skipping"
+                    dest_chain, "cold_path: in-flight op exists — skipping"
                 );
                 continue;
             }
@@ -371,7 +373,14 @@ impl ColdPath {
                 .await;
 
             match self
-                .submit_rebalance_with_retry(&op_id, source_chain, &source_rpc, &source_bank, dest_chain, &amount)
+                .submit_rebalance_with_retry(
+                    &op_id,
+                    source_chain,
+                    &source_rpc,
+                    &source_bank,
+                    dest_chain,
+                    &amount,
+                )
                 .await
             {
                 Ok((tx_hash, ccip_msg_id)) => {
@@ -415,9 +424,7 @@ impl ColdPath {
 
         for attempt in 1..=MAX_RETRIES {
             match self
-                .submit_rebalance_once(
-                    source_chain, rpc_url, bank_addr, dest_chain, amount, key,
-                )
+                .submit_rebalance_once(source_chain, rpc_url, bank_addr, dest_chain, amount, key)
                 .await
             {
                 Ok(result) => return Ok(result),
@@ -552,13 +559,7 @@ impl ColdPath {
             }],
             "id": 1
         });
-        let resp: serde_json::Value = match self
-            .http
-            .post(rpc_url)
-            .json(&body)
-            .send()
-            .await
-        {
+        let resp: serde_json::Value = match self.http.post(rpc_url).json(&body).send().await {
             Ok(r) => match r.json().await {
                 Ok(v) => v,
                 Err(_) => return vec![],
@@ -642,8 +643,8 @@ impl ColdPath {
             .await
             .map_err(|e| e.to_string())?;
         let hex = resp["result"].as_str().ok_or("missing gasPrice")?;
-        let gp = u64::from_str_radix(hex.trim_start_matches("0x"), 16)
-            .map_err(|e| e.to_string())?;
+        let gp =
+            u64::from_str_radix(hex.trim_start_matches("0x"), 16).map_err(|e| e.to_string())?;
         let tip = gp / 10;
         Ok((gp + tip, tip))
     }
@@ -711,9 +712,7 @@ impl ColdPath {
                             .unwrap_or_default();
                         return Ok(logs);
                     }
-                    Some("0x0") => {
-                        return Err(format!("transaction reverted: {tx_hash}"))
-                    }
+                    Some("0x0") => return Err(format!("transaction reverted: {tx_hash}")),
                     _ => {}
                 }
             }
@@ -978,7 +977,7 @@ fn decode_active_chains_from_event(hex_data: &str) -> Option<HashSet<u64>> {
 /// Returns `[0x00]` for zero to satisfy RLP encoding rules for the value field.
 fn u256_to_trimmed_be(val: U256) -> Vec<u8> {
     if val.is_zero() {
-        return vec![];  // RLP value 0 is encoded as empty bytes (0x80)
+        return vec![]; // RLP value 0 is encoded as empty bytes (0x80)
     }
     let bytes = val.to_be_bytes::<32>();
     let start = bytes.iter().position(|&x| x != 0).unwrap_or(31);
@@ -1074,7 +1073,10 @@ mod tests {
         let ops = compute_rebalance_ops(&surpluses, &deficits, None);
         // Surplus is 267; fills 233 to chain 3, then 34 to chain 2.
         assert_eq!(ops.len(), 2);
-        let total_moved: U256 = ops.iter().map(|(_, _, a)| *a).fold(U256::ZERO, |acc, a| acc + a);
+        let total_moved: U256 = ops
+            .iter()
+            .map(|(_, _, a)| *a)
+            .fold(U256::ZERO, |acc, a| acc + a);
         assert_eq!(total_moved, U256::from(267u64));
     }
 
@@ -1087,7 +1089,10 @@ mod tests {
 
         let ops = compute_rebalance_ops(&surpluses, &deficits, cap);
         assert_eq!(ops.len(), 3);
-        let total_moved: U256 = ops.iter().map(|(_, _, a)| *a).fold(U256::ZERO, |acc, a| acc + a);
+        let total_moved: U256 = ops
+            .iter()
+            .map(|(_, _, a)| *a)
+            .fold(U256::ZERO, |acc, a| acc + a);
         assert_eq!(total_moved, U256::from(500u64));
         // Each individual op must be ≤ 200.
         for (_, _, amount) in &ops {

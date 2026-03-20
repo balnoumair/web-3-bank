@@ -26,10 +26,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     })?;
 
     tracing::info!("Running migrations...");
-    sqlx::migrate!("src/db/migrations").run(&pool).await.map_err(|e| {
-        tracing::error!("Failed to run migrations: {e}");
-        e
-    })?;
+    sqlx::migrate!("src/db/migrations")
+        .run(&pool)
+        .await
+        .map_err(|e| {
+            tracing::error!("Failed to run migrations: {e}");
+            e
+        })?;
 
     let addr: std::net::SocketAddr = config.grpc_addr.parse()?;
 
