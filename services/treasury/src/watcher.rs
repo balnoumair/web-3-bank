@@ -34,14 +34,15 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use alloy_primitives::{keccak256, Address, B256, U256};
-use k256::ecdsa::signature::hazmat::PrehashSigner;
-use k256::ecdsa::{RecoveryId, Signature, SigningKey};
+use k256::ecdsa::SigningKey;
 use sqlx::PgPool;
 use tokio::sync::{Mutex, RwLock};
 use tonic::{Request, Response, Status};
 use tracing::{error, info, warn};
 
 use crate::config::Config;
+use crate::error::TxError;
+use crate::eth;
 use crate::proto::treasury::{GetWatcherAlertsRequest, GetWatcherAlertsResponse};
 
 // ── Constants ────────────────────────────────────────────────────────────────
@@ -77,16 +78,6 @@ struct ReleasedEvent {
     amount: U256,
 }
 
-// ── JSON-RPC log entry ───────────────────────────────────────────────────────
-
-#[derive(Debug, serde::Deserialize)]
-struct RpcLog {
-    #[serde(rename = "transactionHash")]
-    transaction_hash: String,
-    topics: Vec<String>,
-    data: String,
-}
-
 // ── Watcher module ───────────────────────────────────────────────────────────
 
 pub struct Watcher {
@@ -116,7 +107,7 @@ impl Watcher {
     /// value to start the verification loops.
     pub fn new(pool: PgPool, config: Arc<Config>, http: reqwest::Client) -> Arc<Self> {
         let (pauser_key, pauser_address) = match &config.pauser_key_path {
-            Some(path) => load_signing_key(path),
+            Some(path) => eth::load_signing_key(path),
             None => (None, None),
         };
         if pauser_key.is_none() {
@@ -159,7 +150,7 @@ impl Watcher {
         &self,
         req: Request<GetWatcherAlertsRequest>,
     ) -> Result<Response<GetWatcherAlertsResponse>, Status> {
-        let limit = req.into_inner().limit.max(1).min(100) as i64;
+        let limit = req.into_inner().limit.clamp(1, 100) as i64;
         let rows = sqlx::query(
             "SELECT id FROM treasury.watcher_alerts \
              ORDER BY created_at DESC LIMIT $1",
@@ -202,7 +193,7 @@ impl Watcher {
                 .collect();
 
             for (chain_id, rpc_url, bank_addr) in chains {
-                let to_block = match self.fetch_block_number(&rpc_url).await {
+                let to_block = match eth::fetch_block_number(&self.http, &rpc_url).await {
                     Some(b) => b,
                     None => continue,
                 };
@@ -214,9 +205,15 @@ impl Watcher {
                 let scan_from = scan_from.max(to_block.saturating_sub(MAX_BLOCK_RANGE));
 
                 let topic = format!("{}", self.hot_path_initiated_topic);
-                let logs = self
-                    .fetch_logs(&rpc_url, &bank_addr, &topic, scan_from, to_block)
-                    .await;
+                let logs = eth::fetch_logs(
+                    &self.http,
+                    &rpc_url,
+                    &bank_addr,
+                    &topic,
+                    scan_from,
+                    to_block,
+                )
+                .await;
 
                 let mut cache = self.initiated_cache.write().await;
                 for log in &logs {
@@ -255,7 +252,7 @@ impl Watcher {
                 .collect();
 
             for (chain_id, rpc_url, bank_addr) in chains {
-                let to_block = match self.fetch_block_number(&rpc_url).await {
+                let to_block = match eth::fetch_block_number(&self.http, &rpc_url).await {
                     Some(b) => b,
                     None => continue,
                 };
@@ -267,9 +264,15 @@ impl Watcher {
                 let scan_from = scan_from.max(to_block.saturating_sub(MAX_BLOCK_RANGE));
 
                 let topic = format!("{}", self.hot_path_released_topic);
-                let logs = self
-                    .fetch_logs(&rpc_url, &bank_addr, &topic, scan_from, to_block)
-                    .await;
+                let logs = eth::fetch_logs(
+                    &self.http,
+                    &rpc_url,
+                    &bank_addr,
+                    &topic,
+                    scan_from,
+                    to_block,
+                )
+                .await;
 
                 for log in logs {
                     if let Some(release) = self.parse_released_event(&log, chain_id) {
@@ -304,7 +307,7 @@ impl Watcher {
             return;
         }
 
-        let recipient_hex = format!("0x{}", bytes_to_hex_raw(release.recipient.as_slice()));
+        let recipient_hex = format!("0x{}", eth::bytes_to_hex(release.recipient.as_slice()));
 
         let (alert_type, initiated_opt) = {
             let cache = self.initiated_cache.read().await;
@@ -346,7 +349,7 @@ impl Watcher {
         let detail = match initiated_opt.as_ref() {
             Some(init) => {
                 let expected_recipient =
-                    format!("0x{}", bytes_to_hex_raw(init.recipient.as_slice()));
+                    format!("0x{}", eth::bytes_to_hex(init.recipient.as_slice()));
                 let mut obj = serde_json::json!({
                     "source_chain_id":    init.source_chain_id,
                     "dest_chain_id":      release.dest_chain_id,
@@ -441,227 +444,51 @@ impl Watcher {
         chain_id: u64,
         key: &SigningKey,
         pauser_addr: &Address,
-    ) -> Result<String, String> {
-        let nonce = self.next_nonce(rpc_url, chain_id, pauser_addr).await?;
-        let (max_fee, max_priority_fee) = self.fetch_gas_params(rpc_url).await?;
+    ) -> Result<String, TxError> {
+        let nonce = self.get_nonce(rpc_url, chain_id, pauser_addr).await?;
+        let (max_fee, max_priority_fee) = eth::fetch_gas_params(&self.http, rpc_url).await?;
 
         // pause() has no arguments — calldata is the 4-byte selector only.
         let call_data = self.pause_selector.to_vec();
-        let bank_addr_bytes = decode_hex(bank_addr)
+        let bank_addr_bytes = eth::decode_hex(bank_addr)
             .filter(|b| b.len() == 20)
-            .ok_or("invalid bank contract address")?;
+            .ok_or(TxError::InvalidAddress)?;
 
-        // EIP-1559 signing payload: 0x02 || rlp([chain_id, nonce, ...])
-        let signing_rlp = build_tx_rlp(
+        let raw_hex = eth::sign_eip1559_tx(
             chain_id,
             nonce,
             max_priority_fee,
             max_fee,
             PAUSE_GAS_LIMIT,
             &bank_addr_bytes,
+            &[],
             &call_data,
-        );
-        let mut to_sign = vec![0x02u8];
-        to_sign.extend_from_slice(&signing_rlp);
-        let hash = keccak256(&to_sign);
-
-        let (sig, recid): (Signature, RecoveryId) = key
-            .sign_prehash(hash.as_slice())
-            .map_err(|e| e.to_string())?;
-
-        let r_bytes = sig.r().to_bytes();
-        let s_bytes = sig.s().to_bytes();
-        let v = recid.to_byte() as u64;
-
-        // Final signed transaction: 0x02 || rlp([..., v, r, s])
-        let signed_rlp = rlp_encode_list(&[
-            rlp_encode_uint(chain_id),
-            rlp_encode_uint(nonce),
-            rlp_encode_uint(max_priority_fee),
-            rlp_encode_uint(max_fee),
-            rlp_encode_uint(PAUSE_GAS_LIMIT),
-            rlp_encode_bytes(&bank_addr_bytes),
-            rlp_encode_bytes(&[]), // value = 0
-            rlp_encode_bytes(&call_data),
-            rlp_encode_list(&[]), // empty access list
-            rlp_encode_uint(v),
-            rlp_encode_bytes(&r_bytes),
-            rlp_encode_bytes(&s_bytes),
-        ]);
-        let mut raw_tx = vec![0x02u8];
-        raw_tx.extend_from_slice(&signed_rlp);
-        let raw_hex = format!("0x{}", bytes_to_hex_raw(&raw_tx));
+            key,
+        )?;
 
         // Advance cached nonce before sending.
         self.nonce_cache.lock().await.insert(chain_id, nonce + 1);
 
-        let tx_hash = self.send_raw_transaction(rpc_url, &raw_hex).await?;
-        self.wait_for_receipt(rpc_url, &tx_hash).await?;
+        let tx_hash = eth::send_raw_transaction(&self.http, rpc_url, &raw_hex).await?;
+        eth::wait_for_receipt(&self.http, rpc_url, &tx_hash, Duration::from_secs(60)).await?;
         Ok(tx_hash)
     }
 
-    // ── RPC helpers ───────────────────────────────────────────────────────────
+    // ── Nonce helper ─────────────────────────────────────────────────────────
 
-    async fn fetch_block_number(&self, rpc_url: &str) -> Option<u64> {
-        let body = serde_json::json!({
-            "jsonrpc": "2.0", "method": "eth_blockNumber", "params": [], "id": 1
-        });
-        let resp: serde_json::Value = self
-            .http
-            .post(rpc_url)
-            .json(&body)
-            .send()
-            .await
-            .ok()?
-            .json()
-            .await
-            .ok()?;
-        let hex = resp["result"].as_str()?;
-        u64::from_str_radix(hex.trim_start_matches("0x"), 16).ok()
-    }
-
-    async fn fetch_logs(
-        &self,
-        rpc_url: &str,
-        address: &str,
-        topic: &str,
-        from_block: u64,
-        to_block: u64,
-    ) -> Vec<RpcLog> {
-        let body = serde_json::json!({
-            "jsonrpc": "2.0",
-            "method": "eth_getLogs",
-            "params": [{
-                "address": address,
-                "topics": [topic],
-                "fromBlock": format!("0x{:x}", from_block),
-                "toBlock":   format!("0x{:x}", to_block)
-            }],
-            "id": 1
-        });
-        let resp: serde_json::Value = match self.http.post(rpc_url).json(&body).send().await {
-            Ok(r) => match r.json().await {
-                Ok(v) => v,
-                Err(_) => return vec![],
-            },
-            Err(_) => return vec![],
-        };
-        serde_json::from_value(resp["result"].clone()).unwrap_or_default()
-    }
-
-    async fn next_nonce(
+    async fn get_nonce(
         &self,
         rpc_url: &str,
         chain_id: u64,
         addr: &Address,
-    ) -> Result<u64, String> {
+    ) -> Result<u64, TxError> {
         {
             let cache = self.nonce_cache.lock().await;
             if let Some(&n) = cache.get(&chain_id) {
                 return Ok(n);
             }
         }
-        let addr_hex = format!("0x{}", bytes_to_hex_raw(addr.as_slice()));
-        let body = serde_json::json!({
-            "jsonrpc": "2.0",
-            "method": "eth_getTransactionCount",
-            "params": [addr_hex, "pending"],
-            "id": 1
-        });
-        let resp: serde_json::Value = self
-            .http
-            .post(rpc_url)
-            .json(&body)
-            .send()
-            .await
-            .map_err(|e| e.to_string())?
-            .json()
-            .await
-            .map_err(|e| e.to_string())?;
-        let hex = resp["result"].as_str().ok_or("missing nonce")?;
-        u64::from_str_radix(hex.trim_start_matches("0x"), 16).map_err(|e| e.to_string())
-    }
-
-    async fn fetch_gas_params(&self, rpc_url: &str) -> Result<(u64, u64), String> {
-        let body = serde_json::json!({
-            "jsonrpc": "2.0", "method": "eth_gasPrice", "params": [], "id": 1
-        });
-        let resp: serde_json::Value = self
-            .http
-            .post(rpc_url)
-            .json(&body)
-            .send()
-            .await
-            .map_err(|e| e.to_string())?
-            .json()
-            .await
-            .map_err(|e| e.to_string())?;
-        let hex = resp["result"].as_str().ok_or("missing gasPrice")?;
-        let gp =
-            u64::from_str_radix(hex.trim_start_matches("0x"), 16).map_err(|e| e.to_string())?;
-        let tip = gp / 10;
-        Ok((gp + tip, tip)) // (maxFeePerGas, maxPriorityFeePerGas)
-    }
-
-    async fn send_raw_transaction(&self, rpc_url: &str, raw_hex: &str) -> Result<String, String> {
-        let body = serde_json::json!({
-            "jsonrpc": "2.0",
-            "method": "eth_sendRawTransaction",
-            "params": [raw_hex],
-            "id": 1
-        });
-        let resp: serde_json::Value = self
-            .http
-            .post(rpc_url)
-            .json(&body)
-            .send()
-            .await
-            .map_err(|e| e.to_string())?
-            .json()
-            .await
-            .map_err(|e| e.to_string())?;
-        if let Some(err) = resp.get("error") {
-            return Err(format!("eth_sendRawTransaction: {}", err));
-        }
-        resp["result"]
-            .as_str()
-            .map(|s| s.to_string())
-            .ok_or_else(|| "no tx hash in response".to_string())
-    }
-
-    async fn wait_for_receipt(&self, rpc_url: &str, tx_hash: &str) -> Result<(), String> {
-        const POLL: Duration = Duration::from_millis(500);
-        const TIMEOUT: Duration = Duration::from_secs(60);
-        let deadline = tokio::time::Instant::now() + TIMEOUT;
-        let body = serde_json::json!({
-            "jsonrpc": "2.0",
-            "method": "eth_getTransactionReceipt",
-            "params": [tx_hash],
-            "id": 1
-        });
-        loop {
-            if tokio::time::Instant::now() > deadline {
-                return Err(format!("timed out waiting for receipt: {}", tx_hash));
-            }
-            let resp: serde_json::Value = self
-                .http
-                .post(rpc_url)
-                .json(&body)
-                .send()
-                .await
-                .map_err(|e| e.to_string())?
-                .json()
-                .await
-                .map_err(|e| e.to_string())?;
-            if let Some(receipt) = resp["result"].as_object() {
-                match receipt.get("status").and_then(|s| s.as_str()) {
-                    Some("0x1") => return Ok(()),
-                    Some("0x0") => return Err(format!("transaction reverted: {}", tx_hash)),
-                    _ => {}
-                }
-            }
-            tokio::time::sleep(POLL).await;
-        }
+        eth::fetch_nonce(&self.http, rpc_url, addr).await
     }
 
     // ── Database helpers ──────────────────────────────────────────────────────
@@ -707,17 +534,21 @@ impl Watcher {
     ///   data      = abi_encode(uint256 amount, uint256 destinationChainId,
     ///                          bytes32 eventHash, uint256 fee)
     ///              [0..32]     [32..64]     [64..96]     [96..128]
-    fn parse_initiated_event(&self, log: &RpcLog, chain_id: u64) -> Option<(B256, InitiatedEvent)> {
+    fn parse_initiated_event(
+        &self,
+        log: &eth::RpcLog,
+        chain_id: u64,
+    ) -> Option<(B256, InitiatedEvent)> {
         if log.topics.len() < 3 {
             return None;
         }
-        let recipient_raw = decode_hex(&log.topics[2])?;
+        let recipient_raw = eth::decode_hex(&log.topics[2])?;
         if recipient_raw.len() < 32 {
             return None;
         }
         let recipient = Address::from_slice(&recipient_raw[12..32]);
 
-        let data = decode_hex(&log.data)?;
+        let data = eth::decode_hex(&log.data)?;
         // 4 slots: amount + destinationChainId + eventHash + fee
         if data.len() < 128 {
             return None;
@@ -745,24 +576,24 @@ impl Watcher {
     ///   topics[1] = indexed to        (address, left-padded to 32 bytes)
     ///   topics[2] = indexed sourceEventHash (bytes32)
     ///   data      = abi_encode(uint256 amount)
-    fn parse_released_event(&self, log: &RpcLog, chain_id: u64) -> Option<ReleasedEvent> {
+    fn parse_released_event(&self, log: &eth::RpcLog, chain_id: u64) -> Option<ReleasedEvent> {
         if log.topics.len() < 3 {
             return None;
         }
 
-        let recipient_raw = decode_hex(&log.topics[1])?;
+        let recipient_raw = eth::decode_hex(&log.topics[1])?;
         if recipient_raw.len() < 32 {
             return None;
         }
         let recipient = Address::from_slice(&recipient_raw[12..32]);
 
-        let transfer_id_raw = decode_hex(&log.topics[2])?;
+        let transfer_id_raw = eth::decode_hex(&log.topics[2])?;
         if transfer_id_raw.len() < 32 {
             return None;
         }
         let transfer_id = B256::from_slice(&transfer_id_raw[..32]);
 
-        let data = decode_hex(&log.data)?;
+        let data = eth::decode_hex(&log.data)?;
         if data.len() < 32 {
             return None;
         }
@@ -786,116 +617,8 @@ impl Watcher {
     /// different endpoints than the relayer.  Falls back to `RPC_URLS`.
     fn effective_rpc_urls(&self) -> &HashMap<u64, String> {
         match &self.config.watcher_rpc_urls {
-            Some(m) => &**m,
-            None => &*self.config.rpc_urls,
+            Some(m) => m,
+            None => &self.config.rpc_urls,
         }
     }
-}
-
-// ── Standalone helpers ────────────────────────────────────────────────────────
-
-/// Load a signing key from a hex-encoded file and derive its Ethereum address.
-fn load_signing_key(path: &str) -> (Option<Arc<SigningKey>>, Option<Address>) {
-    let contents = match std::fs::read_to_string(path) {
-        Ok(c) => c,
-        Err(_) => return (None, None),
-    };
-    let hex = contents.trim().trim_start_matches("0x");
-    let bytes = match decode_hex(hex) {
-        Some(b) if b.len() == 32 => b,
-        _ => return (None, None),
-    };
-    let key = match SigningKey::from_bytes(bytes.as_slice().into()) {
-        Ok(k) => k,
-        Err(_) => return (None, None),
-    };
-    let uncompressed = key.verifying_key().to_encoded_point(false);
-    let hash = keccak256(&uncompressed.as_bytes()[1..]); // skip 0x04 prefix
-    let addr = Address::from_slice(&hash[12..]);
-    (Some(Arc::new(key)), Some(addr))
-}
-
-fn decode_hex(s: &str) -> Option<Vec<u8>> {
-    let s = s.strip_prefix("0x").unwrap_or(s);
-    if s.len() % 2 != 0 {
-        return None;
-    }
-    (0..s.len())
-        .step_by(2)
-        .map(|i| u8::from_str_radix(&s[i..i + 2], 16).ok())
-        .collect()
-}
-
-fn bytes_to_hex_raw(bytes: &[u8]) -> String {
-    use std::fmt::Write;
-    let mut s = String::with_capacity(bytes.len() * 2);
-    for b in bytes {
-        write!(s, "{:02x}", b).unwrap();
-    }
-    s
-}
-
-fn rlp_encode_uint(val: u64) -> Vec<u8> {
-    if val == 0 {
-        return vec![0x80]; // RLP encoding of zero is the empty string
-    }
-    let b = val.to_be_bytes();
-    let start = b.iter().position(|&x| x != 0).unwrap_or(7);
-    rlp_encode_bytes(&b[start..])
-}
-
-fn rlp_encode_bytes(data: &[u8]) -> Vec<u8> {
-    if data.len() == 1 && data[0] < 0x80 {
-        return data.to_vec();
-    }
-    let mut out = Vec::new();
-    if data.len() <= 55 {
-        out.push(0x80 + data.len() as u8);
-    } else {
-        let lb = data.len().to_be_bytes();
-        let ls = lb.iter().position(|&x| x != 0).unwrap_or(7);
-        let lm = &lb[ls..];
-        out.push(0xb7 + lm.len() as u8);
-        out.extend_from_slice(lm);
-    }
-    out.extend_from_slice(data);
-    out
-}
-
-fn rlp_encode_list(items: &[Vec<u8>]) -> Vec<u8> {
-    let payload: Vec<u8> = items.iter().flat_map(|i| i.iter().cloned()).collect();
-    let mut out = Vec::new();
-    if payload.len() <= 55 {
-        out.push(0xc0 + payload.len() as u8);
-    } else {
-        let lb = payload.len().to_be_bytes();
-        let ls = lb.iter().position(|&x| x != 0).unwrap_or(7);
-        let lm = &lb[ls..];
-        out.push(0xf7 + lm.len() as u8);
-        out.extend_from_slice(lm);
-    }
-    out.extend_from_slice(&payload);
-    out
-}
-
-fn build_tx_rlp(
-    chain_id: u64,
-    nonce: u64,
-    max_priority_fee: u64,
-    max_fee: u64,
-    gas_limit: u64,
-    to: &[u8],
-    data: &[u8],
-) -> Vec<u8> {
-    rlp_encode_list(&[
-        rlp_encode_uint(chain_id),
-        rlp_encode_uint(nonce),
-        rlp_encode_uint(max_priority_fee),
-        rlp_encode_uint(max_fee),
-        rlp_encode_uint(gas_limit),
-        rlp_encode_bytes(to),
-        rlp_encode_bytes(&[]), // value = 0
-        rlp_encode_bytes(data),
-        rlp_encode_list(&[]), // empty access list
-    ])
 }

@@ -24,21 +24,21 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use alloy_primitives::{keccak256, Address, B256, U256};
-use k256::ecdsa::signature::hazmat::PrehashSigner;
-use k256::ecdsa::{RecoveryId, Signature, SigningKey};
+use k256::ecdsa::SigningKey;
 use sqlx::PgPool;
 use tokio::sync::{Mutex, RwLock};
 use tonic::{Request, Response, Status};
 use tracing::{error, info, warn};
 
 use crate::config::Config;
+use crate::error::TxError;
+use crate::eth;
 use crate::proto::treasury::{GetRelayStatusRequest, GetRelayStatusResponse};
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
 const EVENT_POLL_INTERVAL: Duration = Duration::from_secs(2);
 const ROUTE_RECEIVER_POLL_INTERVAL: Duration = Duration::from_secs(30);
-const TX_RECEIPT_POLL_INTERVAL: Duration = Duration::from_millis(500);
 const MAX_TX_WAIT: Duration = Duration::from_secs(60);
 const MAX_RELAY_RETRIES: u32 = 3;
 /// Maximum block range per `eth_getLogs` call (some RPCs cap this).
@@ -57,16 +57,6 @@ struct HotPathEvent {
     amount: U256,
     dest_chain_id: u64,
     event_id: B256,
-}
-
-// ── JSON-RPC log entry ───────────────────────────────────────────────────────
-
-#[derive(Debug, serde::Deserialize)]
-struct RpcLog {
-    #[serde(rename = "transactionHash")]
-    transaction_hash: String,
-    topics: Vec<String>,
-    data: String,
 }
 
 // ── Hot path module ──────────────────────────────────────────────────────────
@@ -99,7 +89,7 @@ impl HotPath {
     /// Construct an `Arc<HotPath>`. Call `spawn_background` on the returned
     /// value to start the event-listener and route-receiver loops.
     pub fn new(pool: PgPool, config: Arc<Config>, http: reqwest::Client) -> Arc<Self> {
-        let (relayer_key, relayer_address) = load_relayer_key(&config.relayer_key_path);
+        let (relayer_key, relayer_address) = eth::load_signing_key(&config.relayer_key_path);
 
         // Seed active chains with every chain that has an RPC URL so the relay
         // can forward events before the first ActivationPublished arrives.
@@ -187,7 +177,7 @@ impl HotPath {
                 .collect();
 
             for (chain_id, rpc_url, bank_addr) in chains {
-                let to_block = match self.fetch_block_number(&rpc_url).await {
+                let to_block = match eth::fetch_block_number(&self.http, &rpc_url).await {
                     Some(b) => b,
                     None => continue,
                 };
@@ -203,9 +193,15 @@ impl HotPath {
                 let scan_from = scan_from.max(to_block.saturating_sub(MAX_BLOCK_RANGE));
 
                 let topic = format!("{}", self.hot_path_topic);
-                let logs = self
-                    .fetch_logs(&rpc_url, &bank_addr, &topic, scan_from, to_block)
-                    .await;
+                let logs = eth::fetch_logs(
+                    &self.http,
+                    &rpc_url,
+                    &bank_addr,
+                    &topic,
+                    scan_from,
+                    to_block,
+                )
+                .await;
 
                 for log in logs {
                     if let Some(event) = self.parse_hot_path_event(&log, chain_id) {
@@ -240,7 +236,7 @@ impl HotPath {
         info!("hot_path: route receiver polling started");
 
         loop {
-            let to_block = match self.fetch_block_number(&rpc_url).await {
+            let to_block = match eth::fetch_block_number(&self.http, &rpc_url).await {
                 Some(b) => b,
                 None => {
                     tokio::time::sleep(ROUTE_RECEIVER_POLL_INTERVAL).await;
@@ -254,18 +250,18 @@ impl HotPath {
                 last_block
             };
 
-            let logs = self
-                .fetch_logs(
-                    &rpc_url,
-                    &self.config.route_receiver_address,
-                    &topic,
-                    scan_from,
-                    to_block,
-                )
-                .await;
+            let logs = eth::fetch_logs(
+                &self.http,
+                &rpc_url,
+                &self.config.route_receiver_address,
+                &topic,
+                scan_from,
+                to_block,
+            )
+            .await;
 
             for log in &logs {
-                if let Some(chains) = decode_active_chains_from_event(&log.data) {
+                if let Some(chains) = eth::decode_active_chains_from_event(&log.data) {
                     info!(chains = ?chains, "hot_path: activation state updated from RouteReceiver");
                     *self.active_chains.write().await = chains;
                 }
@@ -323,7 +319,9 @@ impl HotPath {
             }
         };
 
-        match self.fetch_pool_depth(&dest_rpc, &dest_bank).await {
+        match eth::fetch_pool_depth(&self.http, &dest_rpc, &dest_bank, &self.pool_depth_selector)
+            .await
+        {
             Some(depth) if depth >= event.amount => {} // sufficient — proceed
             Some(depth) => {
                 warn!(
@@ -379,11 +377,11 @@ impl HotPath {
         rpc_url: &str,
         bank_addr: &str,
         event: &HotPathEvent,
-    ) -> Result<String, String> {
+    ) -> Result<String, TxError> {
         let key = self
             .relayer_key
             .as_ref()
-            .ok_or_else(|| "relayer key not loaded".to_string())?;
+            .ok_or(TxError::MissingKey)?;
 
         let chain_id = event.dest_chain_id;
         let mut delay = Duration::from_secs(1);
@@ -410,7 +408,7 @@ impl HotPath {
             }
         }
 
-        Err(format!("relay failed after {} attempts", MAX_RELAY_RETRIES))
+        Err(TxError::RetryExhausted { attempts: MAX_RELAY_RETRIES })
     }
 
     async fn submit_release_once(
@@ -420,13 +418,13 @@ impl HotPath {
         event: &HotPathEvent,
         key: &SigningKey,
         chain_id: u64,
-    ) -> Result<String, String> {
+    ) -> Result<String, TxError> {
         let relayer_addr = self
             .relayer_address
-            .ok_or_else(|| "relayer address not set".to_string())?;
+            .ok_or(TxError::MissingKey)?;
 
-        let nonce = self.next_nonce(rpc_url, chain_id, &relayer_addr).await?;
-        let (max_fee, max_priority_fee) = self.fetch_gas_params(rpc_url).await?;
+        let nonce = self.get_nonce(rpc_url, chain_id, &relayer_addr).await?;
+        let (max_fee, max_priority_fee) = eth::fetch_gas_params(&self.http, rpc_url).await?;
         let gas_limit: u64 = 120_000; // conservative estimate for one storage write
 
         let call_data = encode_release_hot_path(
@@ -436,245 +434,45 @@ impl HotPath {
             &event.event_id,
         );
 
-        let bank_addr_bytes = decode_hex(bank_addr)
+        let bank_addr_bytes = eth::decode_hex(bank_addr)
             .filter(|b| b.len() == 20)
-            .ok_or("invalid bank contract address")?;
+            .ok_or(TxError::InvalidAddress)?;
 
-        // EIP-1559 signing payload: 0x02 || rlp([chain_id, nonce, ...])
-        let signing_rlp = build_tx_rlp(
+        let raw_hex = eth::sign_eip1559_tx(
             chain_id,
             nonce,
             max_priority_fee,
             max_fee,
             gas_limit,
             &bank_addr_bytes,
+            &[],
             &call_data,
-        );
-        let mut to_sign = vec![0x02u8];
-        to_sign.extend_from_slice(&signing_rlp);
-        let hash = keccak256(&to_sign);
-
-        let (sig, recid): (Signature, RecoveryId) = key
-            .sign_prehash(hash.as_slice())
-            .map_err(|e| e.to_string())?;
-
-        let r_bytes = sig.r().to_bytes();
-        let s_bytes = sig.s().to_bytes();
-        let v = recid.to_byte() as u64;
-
-        // Final signed transaction: 0x02 || rlp([..., v, r, s])
-        let signed_rlp = rlp_encode_list(&[
-            rlp_encode_uint(chain_id),
-            rlp_encode_uint(nonce),
-            rlp_encode_uint(max_priority_fee),
-            rlp_encode_uint(max_fee),
-            rlp_encode_uint(gas_limit),
-            rlp_encode_bytes(&bank_addr_bytes),
-            rlp_encode_bytes(&[]), // value = 0
-            rlp_encode_bytes(&call_data),
-            rlp_encode_list(&[]), // empty access list
-            rlp_encode_uint(v),
-            rlp_encode_bytes(&r_bytes),
-            rlp_encode_bytes(&s_bytes),
-        ]);
-        let mut raw_tx = vec![0x02u8];
-        raw_tx.extend_from_slice(&signed_rlp);
-        let raw_hex = format!("0x{}", bytes_to_hex_raw(&raw_tx));
+            key,
+        )?;
 
         // Advance cached nonce before sending so concurrent calls don't reuse it.
         self.nonce_cache.lock().await.insert(chain_id, nonce + 1);
 
-        let tx_hash = self.send_raw_transaction(rpc_url, &raw_hex).await?;
-        self.wait_for_receipt(rpc_url, &tx_hash).await?;
+        let tx_hash = eth::send_raw_transaction(&self.http, rpc_url, &raw_hex).await?;
+        eth::wait_for_receipt(&self.http, rpc_url, &tx_hash, MAX_TX_WAIT).await?;
         Ok(tx_hash)
     }
 
-    // ── RPC helpers ───────────────────────────────────────────────────────────
+    // ── Nonce helper ─────────────────────────────────────────────────────────
 
-    async fn fetch_block_number(&self, rpc_url: &str) -> Option<u64> {
-        let body = serde_json::json!({
-            "jsonrpc": "2.0", "method": "eth_blockNumber", "params": [], "id": 1
-        });
-        let resp: serde_json::Value = self
-            .http
-            .post(rpc_url)
-            .json(&body)
-            .send()
-            .await
-            .ok()?
-            .json()
-            .await
-            .ok()?;
-        let hex = resp["result"].as_str()?;
-        u64::from_str_radix(hex.trim_start_matches("0x"), 16).ok()
-    }
-
-    async fn fetch_logs(
-        &self,
-        rpc_url: &str,
-        address: &str,
-        topic: &str,
-        from_block: u64,
-        to_block: u64,
-    ) -> Vec<RpcLog> {
-        let body = serde_json::json!({
-            "jsonrpc": "2.0",
-            "method": "eth_getLogs",
-            "params": [{
-                "address": address,
-                "topics": [topic],
-                "fromBlock": format!("0x{:x}", from_block),
-                "toBlock":   format!("0x{:x}", to_block)
-            }],
-            "id": 1
-        });
-        let resp: serde_json::Value = match self.http.post(rpc_url).json(&body).send().await {
-            Ok(r) => match r.json().await {
-                Ok(v) => v,
-                Err(_) => return vec![],
-            },
-            Err(_) => return vec![],
-        };
-        serde_json::from_value(resp["result"].clone()).unwrap_or_default()
-    }
-
-    async fn fetch_pool_depth(&self, rpc_url: &str, bank_addr: &str) -> Option<U256> {
-        let call_data = format!("0x{}", bytes_to_hex_raw(&self.pool_depth_selector));
-        let body = serde_json::json!({
-            "jsonrpc": "2.0",
-            "method": "eth_call",
-            "params": [{"to": bank_addr, "data": call_data}, "latest"],
-            "id": 1
-        });
-        let resp: serde_json::Value = self
-            .http
-            .post(rpc_url)
-            .json(&body)
-            .send()
-            .await
-            .ok()?
-            .json()
-            .await
-            .ok()?;
-        let bytes = decode_hex(resp["result"].as_str()?)?;
-        if bytes.len() < 32 {
-            return None;
-        }
-        let arr: [u8; 32] = bytes[..32].try_into().ok()?;
-        Some(U256::from_be_bytes(arr))
-    }
-
-    async fn next_nonce(
+    async fn get_nonce(
         &self,
         rpc_url: &str,
         chain_id: u64,
         addr: &Address,
-    ) -> Result<u64, String> {
+    ) -> Result<u64, TxError> {
         {
             let cache = self.nonce_cache.lock().await;
             if let Some(&n) = cache.get(&chain_id) {
                 return Ok(n);
             }
         }
-        let addr_hex = format!("0x{}", bytes_to_hex_raw(addr.as_slice()));
-        let body = serde_json::json!({
-            "jsonrpc": "2.0",
-            "method": "eth_getTransactionCount",
-            "params": [addr_hex, "pending"],
-            "id": 1
-        });
-        let resp: serde_json::Value = self
-            .http
-            .post(rpc_url)
-            .json(&body)
-            .send()
-            .await
-            .map_err(|e| e.to_string())?
-            .json()
-            .await
-            .map_err(|e| e.to_string())?;
-        let hex = resp["result"].as_str().ok_or("missing nonce")?;
-        u64::from_str_radix(hex.trim_start_matches("0x"), 16).map_err(|e| e.to_string())
-    }
-
-    async fn fetch_gas_params(&self, rpc_url: &str) -> Result<(u64, u64), String> {
-        let body = serde_json::json!({
-            "jsonrpc": "2.0", "method": "eth_gasPrice", "params": [], "id": 1
-        });
-        let resp: serde_json::Value = self
-            .http
-            .post(rpc_url)
-            .json(&body)
-            .send()
-            .await
-            .map_err(|e| e.to_string())?
-            .json()
-            .await
-            .map_err(|e| e.to_string())?;
-        let hex = resp["result"].as_str().ok_or("missing gasPrice")?;
-        let gp =
-            u64::from_str_radix(hex.trim_start_matches("0x"), 16).map_err(|e| e.to_string())?;
-        let tip = gp / 10;
-        Ok((gp + tip, tip)) // (maxFeePerGas, maxPriorityFeePerGas)
-    }
-
-    async fn send_raw_transaction(&self, rpc_url: &str, raw_hex: &str) -> Result<String, String> {
-        let body = serde_json::json!({
-            "jsonrpc": "2.0",
-            "method": "eth_sendRawTransaction",
-            "params": [raw_hex],
-            "id": 1
-        });
-        let resp: serde_json::Value = self
-            .http
-            .post(rpc_url)
-            .json(&body)
-            .send()
-            .await
-            .map_err(|e| e.to_string())?
-            .json()
-            .await
-            .map_err(|e| e.to_string())?;
-        if let Some(err) = resp.get("error") {
-            return Err(format!("eth_sendRawTransaction: {}", err));
-        }
-        resp["result"]
-            .as_str()
-            .map(|s| s.to_string())
-            .ok_or_else(|| "no tx hash in response".to_string())
-    }
-
-    async fn wait_for_receipt(&self, rpc_url: &str, tx_hash: &str) -> Result<(), String> {
-        let deadline = tokio::time::Instant::now() + MAX_TX_WAIT;
-        let body = serde_json::json!({
-            "jsonrpc": "2.0",
-            "method": "eth_getTransactionReceipt",
-            "params": [tx_hash],
-            "id": 1
-        });
-        loop {
-            if tokio::time::Instant::now() > deadline {
-                return Err(format!("timed out waiting for receipt: {}", tx_hash));
-            }
-            let resp: serde_json::Value = self
-                .http
-                .post(rpc_url)
-                .json(&body)
-                .send()
-                .await
-                .map_err(|e| e.to_string())?
-                .json()
-                .await
-                .map_err(|e| e.to_string())?;
-            if let Some(receipt) = resp["result"].as_object() {
-                match receipt.get("status").and_then(|s| s.as_str()) {
-                    Some("0x1") => return Ok(()),
-                    Some("0x0") => return Err(format!("transaction reverted: {}", tx_hash)),
-                    _ => {}
-                }
-            }
-            tokio::time::sleep(TX_RECEIPT_POLL_INTERVAL).await;
-        }
+        eth::fetch_nonce(&self.http, rpc_url, addr).await
     }
 
     // ── Database helpers ──────────────────────────────────────────────────────
@@ -695,7 +493,7 @@ impl HotPath {
         status: &str,
     ) {
         let amount_str = event.amount.to_string();
-        let recipient_str = format!("0x{}", bytes_to_hex_raw(event.recipient.as_slice()));
+        let recipient_str = format!("0x{}", eth::bytes_to_hex(event.recipient.as_slice()));
         if let Err(e) = sqlx::query(
             r#"
             INSERT INTO treasury.relay_logs
@@ -751,7 +549,7 @@ impl HotPath {
 
     // ── Event parsing ─────────────────────────────────────────────────────────
 
-    fn parse_hot_path_event(&self, log: &RpcLog, source_chain_id: u64) -> Option<HotPathEvent> {
+    fn parse_hot_path_event(&self, log: &eth::RpcLog, source_chain_id: u64) -> Option<HotPathEvent> {
         // topics[0] = event selector
         // topics[1] = indexed sender   (address, left-padded to 32 bytes)
         // topics[2] = indexed to       (address, left-padded to 32 bytes)
@@ -761,16 +559,16 @@ impl HotPath {
             return None;
         }
 
-        let sender_raw = decode_hex(&log.topics[1])?;
-        let recipient_raw = decode_hex(&log.topics[2])?;
+        let sender_raw = eth::decode_hex(&log.topics[1])?;
+        let recipient_raw = eth::decode_hex(&log.topics[2])?;
         if sender_raw.len() < 32 || recipient_raw.len() < 32 {
             return None;
         }
 
-        let sender = format!("0x{}", bytes_to_hex_raw(&sender_raw[12..32]));
+        let sender = format!("0x{}", eth::bytes_to_hex(&sender_raw[12..32]));
         let recipient = Address::from_slice(&recipient_raw[12..32]);
 
-        let data = decode_hex(&log.data)?;
+        let data = eth::decode_hex(&log.data)?;
         // 4 slots: amount (32) + destinationChainId (32) + eventHash (32) + fee (32)
         if data.len() < 128 {
             return None;
@@ -797,49 +595,6 @@ impl HotPath {
 
 // ── Standalone helpers ────────────────────────────────────────────────────────
 
-/// Load the relayer signing key from a hex-encoded file and derive its address.
-fn load_relayer_key(path: &str) -> (Option<Arc<SigningKey>>, Option<Address>) {
-    let contents = match std::fs::read_to_string(path) {
-        Ok(c) => c,
-        Err(_) => return (None, None),
-    };
-    let hex = contents.trim().trim_start_matches("0x");
-    let bytes = match decode_hex(hex) {
-        Some(b) if b.len() == 32 => b,
-        _ => return (None, None),
-    };
-    let key = match SigningKey::from_bytes(bytes.as_slice().into()) {
-        Ok(k) => k,
-        Err(_) => return (None, None),
-    };
-    let uncompressed = key.verifying_key().to_encoded_point(false);
-    let hash = keccak256(&uncompressed.as_bytes()[1..]); // skip 0x04 prefix
-    let addr = Address::from_slice(&hash[12..]);
-    (Some(Arc::new(key)), Some(addr))
-}
-
-/// Decode a hex string (with or without `0x` prefix) into bytes.
-fn decode_hex(s: &str) -> Option<Vec<u8>> {
-    let s = s.strip_prefix("0x").unwrap_or(s);
-    if s.len() % 2 != 0 {
-        return None;
-    }
-    (0..s.len())
-        .step_by(2)
-        .map(|i| u8::from_str_radix(&s[i..i + 2], 16).ok())
-        .collect()
-}
-
-/// Encode a byte slice as lowercase hex (no `0x` prefix).
-fn bytes_to_hex_raw(bytes: &[u8]) -> String {
-    use std::fmt::Write;
-    let mut s = String::with_capacity(bytes.len() * 2);
-    for b in bytes {
-        write!(s, "{:02x}", b).unwrap();
-    }
-    s
-}
-
 /// ABI-encode `releaseHotPath(address,uint256,bytes32)` call data.
 fn encode_release_hot_path(
     selector: &[u8; 4],
@@ -854,105 +609,4 @@ fn encode_release_hot_path(
     data.extend_from_slice(&amount.to_be_bytes::<32>());
     data.extend_from_slice(event_id.as_slice());
     data
-}
-
-/// Decode the `activeChainsCsv` string from an `ActivationPublished` event's
-/// ABI-encoded data field and return the set of active chain IDs.
-///
-/// ABI head layout (6 params, 192 bytes total):
-///   slot 0 → offset for `runId`
-///   slot 1 → offset for `customerId`
-///   slot 2 = `thresholdBps` (static uint256)
-///   slot 3 → offset for `activeChainsCsv`
-///   slot 4 → offset for `inactiveChainsCsv`
-///   slot 5 = `timestamp` (static uint256)
-fn decode_active_chains_from_event(hex_data: &str) -> Option<HashSet<u64>> {
-    let data = decode_hex(hex_data)?;
-    if data.len() < 6 * 32 {
-        return None;
-    }
-    // Read the pointer at slot 3 (bytes 96..128).
-    let ptr = u64::from_be_bytes(data[3 * 32 + 24..4 * 32].try_into().ok()?) as usize;
-    if ptr + 32 > data.len() {
-        return None;
-    }
-    let len = u64::from_be_bytes(data[ptr + 24..ptr + 32].try_into().ok()?) as usize;
-    if ptr + 32 + len > data.len() {
-        return None;
-    }
-    let csv = std::str::from_utf8(&data[ptr + 32..ptr + 32 + len]).ok()?;
-    Some(
-        csv.split(',')
-            .filter_map(|s| s.trim().parse::<u64>().ok())
-            .collect(),
-    )
-}
-
-// ── Minimal RLP encoding ──────────────────────────────────────────────────────
-
-fn rlp_encode_uint(val: u64) -> Vec<u8> {
-    if val == 0 {
-        return vec![0x80]; // RLP encoding of zero is the empty string
-    }
-    let b = val.to_be_bytes();
-    let start = b.iter().position(|&x| x != 0).unwrap_or(7);
-    rlp_encode_bytes(&b[start..])
-}
-
-fn rlp_encode_bytes(data: &[u8]) -> Vec<u8> {
-    if data.len() == 1 && data[0] < 0x80 {
-        return data.to_vec();
-    }
-    let mut out = Vec::new();
-    if data.len() <= 55 {
-        out.push(0x80 + data.len() as u8);
-    } else {
-        let lb = data.len().to_be_bytes();
-        let ls = lb.iter().position(|&x| x != 0).unwrap_or(7);
-        let lm = &lb[ls..];
-        out.push(0xb7 + lm.len() as u8);
-        out.extend_from_slice(lm);
-    }
-    out.extend_from_slice(data);
-    out
-}
-
-fn rlp_encode_list(items: &[Vec<u8>]) -> Vec<u8> {
-    let payload: Vec<u8> = items.iter().flat_map(|i| i.iter().cloned()).collect();
-    let mut out = Vec::new();
-    if payload.len() <= 55 {
-        out.push(0xc0 + payload.len() as u8);
-    } else {
-        let lb = payload.len().to_be_bytes();
-        let ls = lb.iter().position(|&x| x != 0).unwrap_or(7);
-        let lm = &lb[ls..];
-        out.push(0xf7 + lm.len() as u8);
-        out.extend_from_slice(lm);
-    }
-    out.extend_from_slice(&payload);
-    out
-}
-
-/// Build the RLP-encoded body shared between the signing payload and the
-/// signed transaction (everything except v, r, s).
-fn build_tx_rlp(
-    chain_id: u64,
-    nonce: u64,
-    max_priority_fee: u64,
-    max_fee: u64,
-    gas_limit: u64,
-    to: &[u8],
-    data: &[u8],
-) -> Vec<u8> {
-    rlp_encode_list(&[
-        rlp_encode_uint(chain_id),
-        rlp_encode_uint(nonce),
-        rlp_encode_uint(max_priority_fee),
-        rlp_encode_uint(max_fee),
-        rlp_encode_uint(gas_limit),
-        rlp_encode_bytes(to),
-        rlp_encode_bytes(&[]), // value = 0
-        rlp_encode_bytes(data),
-        rlp_encode_list(&[]), // empty access list
-    ])
 }

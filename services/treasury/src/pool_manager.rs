@@ -13,6 +13,7 @@ use tonic::{Request, Response, Status};
 use tracing::{error, info, warn};
 
 use crate::config::Config;
+use crate::eth;
 use crate::proto::treasury::{GetPoolDepthRequest, GetPoolDepthResponse};
 
 const POLL_INTERVAL: Duration = Duration::from_secs(15);
@@ -94,7 +95,7 @@ impl PoolManager {
                 .collect();
 
             for (chain_id, rpc_url, bank_addr) in chains {
-                match self.fetch_pool_depth(&rpc_url, &bank_addr).await {
+                match eth::fetch_pool_depth(&self.http, &rpc_url, &bank_addr, &self.pool_depth_selector).await {
                     Some(depth) => {
                         self.record_snapshot(chain_id, &depth).await;
                     }
@@ -106,34 +107,6 @@ impl PoolManager {
 
             tokio::time::sleep(POLL_INTERVAL).await;
         }
-    }
-
-    // ── RPC helper ────────────────────────────────────────────────────────────
-
-    async fn fetch_pool_depth(&self, rpc_url: &str, bank_addr: &str) -> Option<U256> {
-        let call_data = format!("0x{}", bytes_to_hex_raw(&self.pool_depth_selector));
-        let body = serde_json::json!({
-            "jsonrpc": "2.0",
-            "method": "eth_call",
-            "params": [{"to": bank_addr, "data": call_data}, "latest"],
-            "id": 1
-        });
-        let resp: serde_json::Value = self
-            .http
-            .post(rpc_url)
-            .json(&body)
-            .send()
-            .await
-            .ok()?
-            .json()
-            .await
-            .ok()?;
-        let bytes = decode_hex(resp["result"].as_str()?)?;
-        if bytes.len() < 32 {
-            return None;
-        }
-        let arr: [u8; 32] = bytes[..32].try_into().ok()?;
-        Some(U256::from_be_bytes(arr))
     }
 
     // ── Database helper ───────────────────────────────────────────────────────
@@ -154,26 +127,4 @@ impl PoolManager {
             info!(chain = chain_id, depth = %depth, "pool_manager: snapshot recorded");
         }
     }
-}
-
-// ── Helpers (duplicated from hot_path to keep modules self-contained) ────────
-
-fn decode_hex(s: &str) -> Option<Vec<u8>> {
-    let s = s.strip_prefix("0x").unwrap_or(s);
-    if s.len() % 2 != 0 {
-        return None;
-    }
-    (0..s.len())
-        .step_by(2)
-        .map(|i| u8::from_str_radix(&s[i..i + 2], 16).ok())
-        .collect()
-}
-
-fn bytes_to_hex_raw(bytes: &[u8]) -> String {
-    use std::fmt::Write;
-    let mut s = String::with_capacity(bytes.len() * 2);
-    for b in bytes {
-        write!(s, "{:02x}", b).unwrap();
-    }
-    s
 }
