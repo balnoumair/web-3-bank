@@ -41,6 +41,7 @@ use tracing::{error, info, warn};
 
 use crate::config::Config;
 use crate::domain::events::{InitiatedEvent, ReleasedEvent};
+use crate::domain::newtypes::ChainId;
 use crate::domain::repository::WatcherRepository;
 use crate::domain::status::AlertType;
 use crate::error::TxError;
@@ -69,7 +70,7 @@ pub struct Watcher {
     /// Ethereum address derived from the pauser signing key.
     pauser_address: Option<Address>,
     /// Per-chain nonce cache for pauser transactions.
-    nonce_cache: Arc<Mutex<HashMap<u64, u64>>>,
+    nonce_cache: Arc<Mutex<HashMap<ChainId, u64>>>,
     /// In-memory cache of HotPathInitiated events keyed by eventId.
     /// eventId is the bytes32 that the relayer passes as `sourceEventHash` to
     /// `releaseHotPath`, so it appears as `sourceEventHash` in HotPathReleased.
@@ -147,18 +148,18 @@ impl Watcher {
     /// This loop intentionally stays ahead of the released loop; the 1-second
     /// stagger in `poll_released_loop` gives it a head start on startup.
     async fn poll_initiated_loop(self: Arc<Self>) {
-        let mut last_block: HashMap<u64, u64> = HashMap::new();
+        let mut last_block: HashMap<ChainId, u64> = HashMap::new();
         info!("watcher: initiated-event cache polling started");
 
         loop {
-            let chains: Vec<(u64, String, String)> = self
+            let chains: Vec<(ChainId, String, String)> = self
                 .effective_rpc_urls()
                 .iter()
                 .filter_map(|(&chain_id, rpc_url)| {
                     self.config
                         .contract_addresses
                         .get(&chain_id)
-                        .map(|addr| (chain_id, rpc_url.clone(), addr.clone()))
+                        .map(|addr| (ChainId(chain_id), rpc_url.clone(), addr.clone()))
                 })
                 .collect();
 
@@ -206,18 +207,18 @@ impl Watcher {
         // Let the initiated loop warm the cache before verification starts.
         tokio::time::sleep(Duration::from_secs(1)).await;
 
-        let mut last_block: HashMap<u64, u64> = HashMap::new();
+        let mut last_block: HashMap<ChainId, u64> = HashMap::new();
         info!("watcher: released-event verification polling started");
 
         loop {
-            let chains: Vec<(u64, String, String)> = self
+            let chains: Vec<(ChainId, String, String)> = self
                 .effective_rpc_urls()
                 .iter()
                 .filter_map(|(&chain_id, rpc_url)| {
                     self.config
                         .contract_addresses
                         .get(&chain_id)
-                        .map(|addr| (chain_id, rpc_url.clone(), addr.clone()))
+                        .map(|addr| (ChainId(chain_id), rpc_url.clone(), addr.clone()))
                 })
                 .collect();
 
@@ -283,13 +284,8 @@ impl Watcher {
             let cache = self.initiated_cache.read().await;
             match cache.get(&release.transfer_id).cloned() {
                 Some(initiated) => {
-                    let amount_ok = initiated.amount == release.amount;
-                    let recipient_ok = initiated.recipient == release.recipient;
-                    if amount_ok && recipient_ok {
-                        (AlertType::Verified, Some(initiated))
-                    } else {
-                        (AlertType::Mismatch, Some(initiated))
-                    }
+                    let alert_type = release.verify_against(&initiated);
+                    (alert_type, Some(initiated))
                 }
                 None => (AlertType::SourceNotFound, None),
             }
@@ -301,7 +297,7 @@ impl Watcher {
             warn!(
                 transfer_id = %transfer_id_hex,
                 alert_type = %alert_type,
-                dest_chain = release.dest_chain_id,
+                dest_chain = release.dest_chain_id.0,
                 dest_tx    = %release.dest_tx_hash,
                 "watcher: anomaly detected — triggering pause"
             );
@@ -309,7 +305,7 @@ impl Watcher {
         } else {
             info!(
                 transfer_id = %transfer_id_hex,
-                dest_chain = release.dest_chain_id,
+                dest_chain = release.dest_chain_id.0,
                 "watcher: release verified"
             );
             None
@@ -321,10 +317,10 @@ impl Watcher {
                 let expected_recipient =
                     format!("0x{}", eth::bytes_to_hex(init.recipient.as_slice()));
                 let mut obj = serde_json::json!({
-                    "source_chain_id":    init.source_chain_id,
-                    "dest_chain_id":      release.dest_chain_id,
-                    "source_tx_hash":     init.source_tx_hash,
-                    "dest_tx_hash":       release.dest_tx_hash,
+                    "source_chain_id":    init.source_chain_id.0,
+                    "dest_chain_id":      release.dest_chain_id.0,
+                    "source_tx_hash":     init.source_tx_hash.as_str(),
+                    "dest_tx_hash":       release.dest_tx_hash.as_str(),
                     "expected_recipient": expected_recipient,
                     "actual_recipient":   recipient_hex,
                     "expected_amount":    init.amount.to_string(),
@@ -337,8 +333,8 @@ impl Watcher {
             }
             None => {
                 let mut obj = serde_json::json!({
-                    "dest_chain_id":    release.dest_chain_id,
-                    "dest_tx_hash":     release.dest_tx_hash,
+                    "dest_chain_id":    release.dest_chain_id.0,
+                    "dest_tx_hash":     release.dest_tx_hash.as_str(),
                     "actual_recipient": recipient_hex,
                     "actual_amount":    release.amount.to_string(),
                 });
@@ -362,12 +358,12 @@ impl Watcher {
 
         let rpc_url = self
             .effective_rpc_urls()
-            .get(&release.dest_chain_id)
+            .get(&release.dest_chain_id.0)
             .cloned()?;
         let bank_addr = self
             .config
             .contract_addresses
-            .get(&release.dest_chain_id)
+            .get(&release.dest_chain_id.0)
             .cloned()?;
 
         let chain_id = release.dest_chain_id;
@@ -381,7 +377,7 @@ impl Watcher {
                 Ok(tx_hash) => {
                     info!(
                         transfer_id = %release.transfer_id,
-                        chain_id,
+                        chain_id = chain_id.0,
                         pause_tx = %tx_hash,
                         "watcher: contract paused"
                     );
@@ -400,7 +396,7 @@ impl Watcher {
         }
 
         error!(
-            chain_id,
+            chain_id = chain_id.0,
             transfer_id = %release.transfer_id,
             "watcher: pause failed after all retries"
         );
@@ -411,7 +407,7 @@ impl Watcher {
         &self,
         rpc_url: &str,
         bank_addr: &str,
-        chain_id: u64,
+        chain_id: ChainId,
         key: &SigningKey,
         pauser_addr: &Address,
     ) -> Result<String, TxError> {
@@ -425,7 +421,7 @@ impl Watcher {
             .ok_or(TxError::InvalidAddress)?;
 
         let raw_hex = eth::sign_eip1559_tx(
-            chain_id,
+            chain_id.0,
             nonce,
             max_priority_fee,
             max_fee,
@@ -449,7 +445,7 @@ impl Watcher {
     async fn get_nonce(
         &self,
         rpc_url: &str,
-        chain_id: u64,
+        chain_id: ChainId,
         addr: &Address,
     ) -> Result<u64, TxError> {
         {
@@ -475,7 +471,7 @@ impl Watcher {
     fn parse_initiated_event(
         &self,
         log: &eth::RpcLog,
-        chain_id: u64,
+        chain_id: ChainId,
     ) -> Option<(B256, InitiatedEvent)> {
         if log.topics.len() < 3 {
             return None;
@@ -496,11 +492,12 @@ impl Watcher {
         // eventHash is the third 32-byte slot in data.
         let event_id = B256::from_slice(&data[64..96]);
 
+        use crate::domain::newtypes::TxHash;
         Some((
             event_id,
             InitiatedEvent {
                 source_chain_id: chain_id,
-                source_tx_hash: log.transaction_hash.clone(),
+                source_tx_hash: TxHash(log.transaction_hash.clone()),
                 recipient,
                 amount,
             },
@@ -514,7 +511,7 @@ impl Watcher {
     ///   topics[1] = indexed to        (address, left-padded to 32 bytes)
     ///   topics[2] = indexed sourceEventHash (bytes32)
     ///   data      = abi_encode(uint256 amount)
-    fn parse_released_event(&self, log: &eth::RpcLog, chain_id: u64) -> Option<ReleasedEvent> {
+    fn parse_released_event(&self, log: &eth::RpcLog, chain_id: ChainId) -> Option<ReleasedEvent> {
         if log.topics.len() < 3 {
             return None;
         }
@@ -538,9 +535,10 @@ impl Watcher {
         let amount_bytes: [u8; 32] = data[0..32].try_into().ok()?;
         let amount = U256::from_be_bytes(amount_bytes);
 
+        use crate::domain::newtypes::TxHash;
         Some(ReleasedEvent {
             dest_chain_id: chain_id,
-            dest_tx_hash: log.transaction_hash.clone(),
+            dest_tx_hash: TxHash(log.transaction_hash.clone()),
             transfer_id,
             recipient,
             amount,

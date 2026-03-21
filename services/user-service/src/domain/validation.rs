@@ -1,4 +1,48 @@
-//! Domain validation rules.
+//! Domain validation rules and validated value types.
+//!
+//! [`valid_tempo_address`] provides the raw predicate, while [`TempoAddress`]
+//! is a validated newtype that bakes the check into construction via
+//! [`TryFrom`] so invalid addresses can never reach the repository layer.
+
+use crate::domain::errors::DomainError;
+
+/// A validated Tempo (Ethereum-style) address.
+///
+/// Guaranteed to be a 0x-prefixed 40-character hex string.
+/// Use [`TryFrom<String>`] or [`TryFrom<&str>`] to construct from untrusted
+/// input.  Trusted sources (e.g. DB rows that were already validated on write)
+/// may construct directly via the public inner field.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TempoAddress(pub String);
+
+impl TempoAddress {
+    pub fn as_str(&self) -> &str { &self.0 }
+}
+
+impl std::fmt::Display for TempoAddress {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::ops::Deref for TempoAddress {
+    type Target = str;
+    fn deref(&self) -> &str { &self.0 }
+}
+
+impl TryFrom<String> for TempoAddress {
+    type Error = DomainError;
+    fn try_from(s: String) -> Result<Self, Self::Error> {
+        if valid_tempo_address(&s) { Ok(TempoAddress(s)) } else { Err(DomainError::InvalidTempoAddress) }
+    }
+}
+
+impl TryFrom<&str> for TempoAddress {
+    type Error = DomainError;
+    fn try_from(s: &str) -> Result<Self, Self::Error> {
+        if valid_tempo_address(s) { Ok(TempoAddress(s.to_string())) } else { Err(DomainError::InvalidTempoAddress) }
+    }
+}
 
 /// Regex for a 0x-prefixed 40-character hex Ethereum address.
 static TEMPO_ADDR_RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();

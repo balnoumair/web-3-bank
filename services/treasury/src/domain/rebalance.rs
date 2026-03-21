@@ -66,6 +66,39 @@ pub fn compute_rebalance_ops(
     ops
 }
 
+/// The outcome of evaluating whether a single rebalance operation should be submitted.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RebalanceOpDecision {
+    /// Operation should be submitted.
+    Submit,
+    /// Source pool depth has dropped below the required amount since the cycle began.
+    SkipInsufficientDepth,
+    /// A recent operation for this chain pair is still in flight.
+    SkipOpInFlight,
+}
+
+/// Evaluate whether a single rebalance operation should be submitted.
+///
+/// - `live_depth`: current source pool depth (pre-fetched by the caller).
+///   Fetch failures are an infrastructure concern; the caller should `continue`
+///   before invoking this function when the depth cannot be determined.
+/// - `required_amount`: the amount to move from the source chain.
+/// - `op_in_flight`: whether a recent pending/submitted op for this chain pair
+///   already exists (24-hour idempotency window).
+pub fn evaluate_rebalance_op(
+    live_depth: U256,
+    required_amount: U256,
+    op_in_flight: bool,
+) -> RebalanceOpDecision {
+    if live_depth < required_amount {
+        return RebalanceOpDecision::SkipInsufficientDepth;
+    }
+    if op_in_flight {
+        return RebalanceOpDecision::SkipOpInFlight;
+    }
+    RebalanceOpDecision::Submit
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -108,5 +141,38 @@ mod tests {
         let deficits: Vec<(u64, U256)> = vec![];
         let ops = compute_rebalance_ops(&surpluses, &deficits, None);
         assert!(ops.is_empty());
+    }
+
+    // ── evaluate_rebalance_op ─────────────────────────────────────────────────
+
+    #[test]
+    fn op_submits_when_depth_sufficient_and_no_inflight() {
+        let decision = evaluate_rebalance_op(U256::from(500u64), U256::from(100u64), false);
+        assert_eq!(decision, RebalanceOpDecision::Submit);
+    }
+
+    #[test]
+    fn op_skips_when_depth_insufficient() {
+        let decision = evaluate_rebalance_op(U256::from(50u64), U256::from(100u64), false);
+        assert_eq!(decision, RebalanceOpDecision::SkipInsufficientDepth);
+    }
+
+    #[test]
+    fn op_skips_inflight_when_depth_sufficient() {
+        let decision = evaluate_rebalance_op(U256::from(500u64), U256::from(100u64), true);
+        assert_eq!(decision, RebalanceOpDecision::SkipOpInFlight);
+    }
+
+    #[test]
+    fn insufficient_depth_takes_priority_over_inflight() {
+        // Depth check should fail before the in-flight check.
+        let decision = evaluate_rebalance_op(U256::from(10u64), U256::from(100u64), true);
+        assert_eq!(decision, RebalanceOpDecision::SkipInsufficientDepth);
+    }
+
+    #[test]
+    fn exact_depth_submits() {
+        let decision = evaluate_rebalance_op(U256::from(100u64), U256::from(100u64), false);
+        assert_eq!(decision, RebalanceOpDecision::Submit);
     }
 }

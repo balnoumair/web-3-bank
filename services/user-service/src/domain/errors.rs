@@ -3,7 +3,15 @@
 //! These represent business rule violations independent of
 //! infrastructure. Infrastructure-specific errors (e.g. database)
 //! are mapped at the adapter layer.
+//!
+//! # Unified error hierarchy
+//!
+//! All credential-specific errors (e.g. [`DomainError::LastActiveCredential`],
+//! [`DomainError::CredentialNotFound`]) are variants here rather than a
+//! separate `CredentialError` type, keeping the hierarchy flat and avoiding
+//! the need for `From` conversions between hierarchies.
 
+/// Unified domain error type for user and credential operations.
 #[derive(Debug, thiserror::Error)]
 pub enum DomainError {
     #[error("last active credential — cannot revoke")]

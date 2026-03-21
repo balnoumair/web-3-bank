@@ -11,6 +11,7 @@ use tonic::{Request, Response, Status};
 use tracing::{info, warn};
 
 use crate::config::Config;
+use crate::domain::newtypes::ChainId;
 use crate::domain::repository::PoolSnapshotRepository;
 use crate::eth;
 use crate::proto::treasury::{GetPoolDepthRequest, GetPoolDepthResponse};
@@ -51,7 +52,7 @@ impl PoolManager {
         &self,
         req: Request<GetPoolDepthRequest>,
     ) -> Result<Response<GetPoolDepthResponse>, Status> {
-        let chain_id = req.into_inner().chain_id as i64;
+        let chain_id = ChainId(req.into_inner().chain_id as u64);
         match self.snapshot_repo.get_latest_depth(chain_id).await {
             Some(depth_wei) => Ok(Response::new(GetPoolDepthResponse { depth_wei })),
             None => Err(Status::not_found("no pool depth snapshot for that chain")),
@@ -80,7 +81,7 @@ impl PoolManager {
             for (chain_id, rpc_url, bank_addr) in chains {
                 match eth::fetch_pool_depth(&self.http, &rpc_url, &bank_addr, &self.pool_depth_selector).await {
                     Some(depth) => {
-                        self.snapshot_repo.record_snapshot(chain_id, &depth).await;
+                        self.snapshot_repo.record_snapshot(ChainId(chain_id), &depth).await;
                         info!(chain = chain_id, depth = %depth, "pool_manager: snapshot recorded");
                     }
                     None => {

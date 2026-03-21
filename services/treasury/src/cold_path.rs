@@ -34,7 +34,8 @@ use tracing::{error, info, warn};
 
 use crate::config::Config;
 use crate::domain::abi::{encode_rebalance, extract_ccip_message_id};
-use crate::domain::rebalance::compute_rebalance_ops;
+use crate::domain::newtypes::{ChainId, OperationId, TxHash};
+use crate::domain::rebalance::{compute_rebalance_ops, evaluate_rebalance_op, RebalanceOpDecision};
 use crate::domain::repository::RebalanceRepository;
 use crate::error::TxError;
 use crate::eth;
@@ -57,13 +58,13 @@ pub struct ColdPath {
     /// Active chain IDs from the latest `ActivationPublished` event.
     /// Seeded with all configured chains so rebalancing works before the
     /// first RouteReceiver publish arrives.
-    active_chains: Arc<RwLock<HashSet<u64>>>,
+    active_chains: Arc<RwLock<HashSet<ChainId>>>,
     /// Relayer ECDSA signing key (absent when key file is missing/invalid).
     relayer_key: Option<Arc<SigningKey>>,
     /// Ethereum address derived from the relayer signing key.
     relayer_address: Option<Address>,
     /// Per-chain nonce cache to avoid redundant RPC round-trips.
-    nonce_cache: Arc<Mutex<HashMap<u64, u64>>>,
+    nonce_cache: Arc<Mutex<HashMap<ChainId, u64>>>,
     /// 4-byte selector for `poolDepth()`
     pool_depth_selector: [u8; 4],
     /// 4-byte selector for `rebalance(uint64,uint256)`
@@ -84,7 +85,7 @@ impl ColdPath {
     pub fn new(rebalance_repo: Arc<dyn RebalanceRepository>, config: Arc<Config>, http: reqwest::Client) -> Arc<Self> {
         let (relayer_key, relayer_address) = eth::load_signing_key(&config.relayer_key_path);
 
-        let initial: HashSet<u64> = config.rpc_urls.keys().cloned().collect();
+        let initial: HashSet<ChainId> = config.rpc_urls.keys().map(|&k| ChainId(k)).collect();
 
         let pool_depth_hash = keccak256(b"poolDepth()");
         let mut pool_depth_selector = [0u8; 4];
@@ -197,11 +198,12 @@ impl ColdPath {
 
             for log in &logs {
                 if let Some(chains) = eth::decode_active_chains_from_event(&log.data) {
+                    let chains_converted: HashSet<ChainId> = chains.into_iter().map(ChainId).collect();
                     info!(
-                        chains = ?chains,
+                        chains = ?chains_converted,
                         "cold_path: activation state updated from RouteReceiver"
                     );
-                    *self.active_chains.write().await = chains;
+                    *self.active_chains.write().await = chains_converted;
                 }
             }
 
@@ -216,18 +218,18 @@ impl ColdPath {
         let active = self.active_chains.read().await.clone();
 
         // Collect chain info for active chains that have both an RPC and a contract address.
-        let chains: Vec<(u64, String, String)> = self
+        let chains: Vec<(ChainId, String, String)> = self
             .config
             .rpc_urls
             .iter()
             .filter_map(|(&chain_id, rpc_url)| {
-                if !active.contains(&chain_id) {
+                if !active.contains(&ChainId(chain_id)) {
                     return None;
                 }
                 self.config
                     .contract_addresses
                     .get(&chain_id)
-                    .map(|addr| (chain_id, rpc_url.clone(), addr.clone()))
+                    .map(|addr| (ChainId(chain_id), rpc_url.clone(), addr.clone()))
             })
             .collect();
 
@@ -237,7 +239,7 @@ impl ColdPath {
         }
 
         // ── 1. Fetch current pool depths ──────────────────────────────────────
-        let mut depths: HashMap<u64, U256> = HashMap::new();
+        let mut depths: HashMap<ChainId, U256> = HashMap::new();
         for (chain_id, rpc_url, bank_addr) in &chains {
             match eth::fetch_pool_depth(&self.http, rpc_url, bank_addr, &self.pool_depth_selector)
                 .await
@@ -247,7 +249,7 @@ impl ColdPath {
                 }
                 None => {
                     warn!(
-                        chain = chain_id,
+                        chain = chain_id.0,
                         "cold_path: failed to fetch pool depth — skipping cycle"
                     );
                     return;
@@ -266,7 +268,7 @@ impl ColdPath {
         let target_bps = self.config.cold_path_target_bps;
 
         // Compute the target depth for a chain.
-        let target_depth = |_chain_id: u64| -> U256 {
+        let target_depth = |_chain_id: ChainId| -> U256 {
             if target_bps == 0 {
                 // Equal distribution.
                 total / U256::from(n)
@@ -282,7 +284,7 @@ impl ColdPath {
             let below = ratio_bps < U256::from(min_bps);
             if below {
                 info!(
-                    chain = chain_id,
+                    chain = chain_id.0,
                     ratio_bps = ratio_bps.to_string(),
                     min_bps,
                     "cold_path: chain below minimum pool ratio"
@@ -303,9 +305,9 @@ impl ColdPath {
         for (&chain_id, &depth) in &depths {
             let target = target_depth(chain_id);
             if depth > target {
-                surpluses.push((chain_id, depth - target));
+                surpluses.push((chain_id.0, depth - target));
             } else if depth < target {
-                deficits.push((chain_id, target - depth));
+                deficits.push((chain_id.0, target - depth));
             }
         }
 
@@ -319,17 +321,21 @@ impl ColdPath {
         info!(op_count = ops.len(), "cold_path: executing rebalance cycle");
 
         // ── 5. Submit each operation (sequentially to keep nonces ordered) ─────
-        for (source_chain, dest_chain, amount) in ops {
+        for (source_chain_raw, dest_chain_raw, amount) in ops {
+            let source_chain = ChainId(source_chain_raw);
+            let dest_chain = ChainId(dest_chain_raw);
+
             // Safety: verify source pool still has sufficient surplus.
-            let source_rpc = match self.config.rpc_urls.get(&source_chain) {
+            let source_rpc = match self.config.rpc_urls.get(&source_chain.0) {
                 Some(u) => u.clone(),
                 None => continue,
             };
-            let source_bank = match self.config.contract_addresses.get(&source_chain) {
+            let source_bank = match self.config.contract_addresses.get(&source_chain.0) {
                 Some(a) => a.clone(),
                 None => continue,
             };
-            match eth::fetch_pool_depth(
+            // Infrastructure: re-verify source pool depth before committing.
+            let live_depth = match eth::fetch_pool_depth(
                 &self.http,
                 &source_rpc,
                 &source_bank,
@@ -337,33 +343,38 @@ impl ColdPath {
             )
             .await
             {
-                Some(live_depth) if live_depth >= amount => {} // sufficient — proceed
-                Some(live_depth) => {
+                Some(d) => d,
+                None => {
                     warn!(
-                        source_chain,
-                        dest_chain,
+                        source_chain = source_chain.0,
+                        "cold_path: could not re-verify source depth — skipping"
+                    );
+                    continue;
+                }
+            };
+            let op_in_flight = self.rebalance_repo.op_in_flight(source_chain, dest_chain).await;
+
+            // Domain decision: should this operation be submitted?
+            match evaluate_rebalance_op(live_depth, amount, op_in_flight) {
+                RebalanceOpDecision::Submit => {}
+                RebalanceOpDecision::SkipInsufficientDepth => {
+                    warn!(
+                        source_chain = source_chain.0,
+                        dest_chain = dest_chain.0,
                         amount = %amount,
                         depth = %live_depth,
                         "cold_path: source pool shrank — skipping this op"
                     );
                     continue;
                 }
-                None => {
-                    warn!(
-                        source_chain,
-                        "cold_path: could not re-verify source depth — skipping"
+                RebalanceOpDecision::SkipOpInFlight => {
+                    info!(
+                        source_chain = source_chain.0,
+                        dest_chain = dest_chain.0,
+                        "cold_path: in-flight op exists — skipping"
                     );
                     continue;
                 }
-            }
-
-            // Idempotency: skip if a recent op for this chain pair is still in flight.
-            if self.rebalance_repo.op_in_flight(source_chain, dest_chain).await {
-                info!(
-                    source_chain,
-                    dest_chain, "cold_path: in-flight op exists — skipping"
-                );
-                continue;
             }
 
             // Generate a unique op_id from chain IDs and wall-clock milliseconds.
@@ -371,7 +382,7 @@ impl ColdPath {
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default()
                 .as_millis();
-            let op_id = format!("{source_chain}-{dest_chain}-{ts_ms}");
+            let op_id = OperationId(format!("{}-{}-{}", source_chain, dest_chain, ts_ms));
 
             self.rebalance_repo.insert_rebalance_op(&op_id, source_chain, dest_chain, &amount)
                 .await;
@@ -389,11 +400,11 @@ impl ColdPath {
             {
                 Ok((tx_hash, ccip_msg_id)) => {
                     info!(
-                        op_id,
-                        source_chain,
-                        dest_chain,
+                        op_id = %op_id,
+                        source_chain = source_chain.0,
+                        dest_chain = dest_chain.0,
                         amount = %amount,
-                        tx_hash,
+                        tx_hash = %tx_hash,
                         ccip_message_id = ccip_msg_id.as_deref().unwrap_or("unknown"),
                         "cold_path: rebalance submitted"
                     );
@@ -401,7 +412,7 @@ impl ColdPath {
                         .await;
                 }
                 Err(e) => {
-                    error!(op_id, err = %e, "cold_path: rebalance failed after retries");
+                    error!(op_id = %op_id, err = %e, "cold_path: rebalance failed after retries");
                     self.rebalance_repo.update_rebalance_op_failed(&op_id).await;
                 }
             }
@@ -412,13 +423,13 @@ impl ColdPath {
 
     async fn submit_rebalance_with_retry(
         &self,
-        op_id: &str,
-        source_chain: u64,
+        op_id: &OperationId,
+        source_chain: ChainId,
         rpc_url: &str,
         bank_addr: &str,
-        dest_chain: u64,
+        dest_chain: ChainId,
         amount: &U256,
-    ) -> Result<(String, Option<String>), TxError> {
+    ) -> Result<(TxHash, Option<String>), TxError> {
         let key = self
             .relayer_key
             .as_ref()
@@ -433,7 +444,7 @@ impl ColdPath {
             {
                 Ok(result) => return Ok(result),
                 Err(e) => {
-                    warn!(op_id, attempt, err = %e, "cold_path: rebalance attempt failed");
+                    warn!(op_id = %op_id, attempt, err = %e, "cold_path: rebalance attempt failed");
                     self.nonce_cache.lock().await.remove(&source_chain);
                     if attempt < MAX_RETRIES {
                         tokio::time::sleep(delay).await;
@@ -448,13 +459,13 @@ impl ColdPath {
 
     async fn submit_rebalance_once(
         &self,
-        chain_id: u64,
+        chain_id: ChainId,
         rpc_url: &str,
         bank_addr: &str,
-        dest_chain_id: u64,
+        dest_chain_id: ChainId,
         amount: &U256,
         key: &SigningKey,
-    ) -> Result<(String, Option<String>), TxError> {
+    ) -> Result<(TxHash, Option<String>), TxError> {
         let relayer_addr = self
             .relayer_address
             .ok_or(TxError::MissingKey)?;
@@ -462,14 +473,14 @@ impl ColdPath {
         let nonce = self.get_nonce(rpc_url, chain_id, &relayer_addr).await?;
         let (max_fee, max_priority_fee) = eth::fetch_gas_params(&self.http, rpc_url).await?;
 
-        let call_data = encode_rebalance(&self.rebalance_selector, dest_chain_id, amount);
+        let call_data = encode_rebalance(&self.rebalance_selector, dest_chain_id.0, amount);
 
         let bank_addr_bytes = eth::decode_hex(bank_addr)
             .filter(|b| b.len() == 20)
             .ok_or(TxError::InvalidAddress)?;
 
         let raw_hex = eth::sign_eip1559_tx(
-            chain_id,
+            chain_id.0,
             nonce,
             max_priority_fee,
             max_fee,
@@ -483,15 +494,15 @@ impl ColdPath {
         // Advance cached nonce before sending.
         self.nonce_cache.lock().await.insert(chain_id, nonce + 1);
 
-        let tx_hash = eth::send_raw_transaction(&self.http, rpc_url, &raw_hex).await?;
+        let tx_hash_str = eth::send_raw_transaction(&self.http, rpc_url, &raw_hex).await?;
         let receipt_logs =
-            eth::wait_for_receipt_logs(&self.http, rpc_url, &tx_hash, MAX_TX_WAIT).await?;
+            eth::wait_for_receipt_logs(&self.http, rpc_url, &tx_hash_str, MAX_TX_WAIT).await?;
 
         // Best-effort: extract CCIP messageId from tx logs (bytes32 in topics[1]
         // of any log that has at least 2 topics and a 32-byte first data topic).
         let ccip_message_id = extract_ccip_message_id(&receipt_logs);
 
-        Ok((tx_hash, ccip_message_id))
+        Ok((TxHash(tx_hash_str), ccip_message_id))
     }
 
     // ── Nonce helper ─────────────────────────────────────────────────────────
@@ -501,7 +512,7 @@ impl ColdPath {
     async fn get_nonce(
         &self,
         rpc_url: &str,
-        chain_id: u64,
+        chain_id: ChainId,
         addr: &Address,
     ) -> Result<u64, TxError> {
         {

@@ -32,6 +32,8 @@ use tracing::{error, info, warn};
 use crate::config::Config;
 use crate::domain::abi::encode_release_hot_path;
 use crate::domain::events::HotPathEvent;
+use crate::domain::newtypes::{ChainId, EventHash, TxHash};
+use crate::domain::relay::{evaluate_relay_eligibility, RelayDecision};
 use crate::domain::repository::RelayRepository;
 use crate::domain::status::RelayStatus;
 use crate::error::TxError;
@@ -56,13 +58,13 @@ pub struct HotPath {
     /// Chain IDs currently in the active set per the latest ActivationPublished
     /// event. Seeded with all configured chains at startup so the relay works
     /// before the first CRE publish arrives.
-    active_chains: Arc<RwLock<HashSet<u64>>>,
+    active_chains: Arc<RwLock<HashSet<ChainId>>>,
     /// Relayer ECDSA signing key (absent when the key file is missing/invalid).
     relayer_key: Option<Arc<SigningKey>>,
     /// Ethereum address derived from the relayer signing key.
     relayer_address: Option<Address>,
     /// Per-chain nonce cache to avoid an extra RPC round-trip on each tx.
-    nonce_cache: Arc<Mutex<HashMap<u64, u64>>>,
+    nonce_cache: Arc<Mutex<HashMap<ChainId, u64>>>,
     /// keccak256("HotPathInitiated(address,address,uint256,uint256,bytes32,uint256)")
     hot_path_topic: B256,
     /// keccak256("ActivationPublished(string,string,string,uint256,string,string,uint256)")
@@ -81,7 +83,7 @@ impl HotPath {
 
         // Seed active chains with every chain that has an RPC URL so the relay
         // can forward events before the first ActivationPublished arrives.
-        let initial: HashSet<u64> = config.rpc_urls.keys().cloned().collect();
+        let initial: HashSet<ChainId> = config.rpc_urls.keys().map(|&k| ChainId(k)).collect();
 
         let hot_path_topic =
             keccak256(b"HotPathInitiated(address,address,uint256,uint256,bytes32,uint256)");
@@ -124,7 +126,7 @@ impl HotPath {
         &self,
         req: Request<GetRelayStatusRequest>,
     ) -> Result<Response<GetRelayStatusResponse>, Status> {
-        let hash = req.into_inner().source_event_hash;
+        let hash = EventHash(req.into_inner().source_event_hash);
         match self.relay_repo.get_relay_status(&hash).await {
             Some(status) => Ok(Response::new(GetRelayStatusResponse { status })),
             None => Err(Status::not_found("no relay log found for that event hash")),
@@ -136,12 +138,12 @@ impl HotPath {
     /// Poll every source chain for `HotPathInitiated` events and dispatch each
     /// to `relay_event`.
     async fn poll_events_loop(self: Arc<Self>) {
-        let mut last_block: HashMap<u64, u64> = HashMap::new();
+        let mut last_block: HashMap<ChainId, u64> = HashMap::new();
         info!("hot_path: event polling started");
 
         loop {
             // Collect chain entries to avoid borrow conflicts.
-            let chains: Vec<(u64, String, String)> = self
+            let chains: Vec<(ChainId, String, String)> = self
                 .config
                 .rpc_urls
                 .iter()
@@ -149,7 +151,7 @@ impl HotPath {
                     self.config
                         .contract_addresses
                         .get(&chain_id)
-                        .map(|addr| (chain_id, rpc_url.clone(), addr.clone()))
+                        .map(|addr| (ChainId(chain_id), rpc_url.clone(), addr.clone()))
                 })
                 .collect();
 
@@ -239,8 +241,10 @@ impl HotPath {
 
             for log in &logs {
                 if let Some(chains) = eth::decode_active_chains_from_event(&log.data) {
-                    info!(chains = ?chains, "hot_path: activation state updated from RouteReceiver");
-                    *self.active_chains.write().await = chains;
+                    // decode_active_chains_from_event returns HashSet<u64>; convert to HashSet<ChainId>
+                    let chains_converted: HashSet<ChainId> = chains.into_iter().map(ChainId).collect();
+                    info!(chains = ?chains_converted, "hot_path: activation state updated from RouteReceiver");
+                    *self.active_chains.write().await = chains_converted;
                 }
             }
 
@@ -257,82 +261,100 @@ impl HotPath {
             return;
         }
 
-        // 2. Destination chain must be active.
-        if !self
+        // 2. Read destination chain active state.
+        let chain_active = self
             .active_chains
             .read()
             .await
-            .contains(&event.dest_chain_id)
-        {
-            warn!(
-                src = event.source_event_hash,
-                dest_chain = event.dest_chain_id,
-                "hot_path: rejected — destination chain not active"
-            );
-            self.relay_repo.insert_relay_log(&event, None, RelayStatus::RejectedInactiveChain)
-                .await;
-            return;
-        }
+            .contains(&event.dest_chain_id);
 
-        // 3. Destination pool must have sufficient depth.
-        let dest_rpc = match self.config.rpc_urls.get(&event.dest_chain_id) {
+        // 3. Resolve destination RPC and contract addresses from config.
+        let dest_rpc = match self.config.rpc_urls.get(&event.dest_chain_id.0) {
             Some(u) => u.clone(),
             None => {
                 warn!(
-                    chain = event.dest_chain_id,
+                    chain = event.dest_chain_id.0,
                     "hot_path: no RPC for dest chain"
                 );
                 return;
             }
         };
-        let dest_bank = match self.config.contract_addresses.get(&event.dest_chain_id) {
+        let dest_bank = match self.config.contract_addresses.get(&event.dest_chain_id.0) {
             Some(a) => a.clone(),
             None => {
                 warn!(
-                    chain = event.dest_chain_id,
+                    chain = event.dest_chain_id.0,
                     "hot_path: no bank contract for dest chain"
                 );
                 return;
             }
         };
 
-        match eth::fetch_pool_depth(&self.http, &dest_rpc, &dest_bank, &self.pool_depth_selector)
+        // 4. Fetch destination pool depth (skipped for inactive chains to avoid a
+        //    pointless RPC call — the domain will reject on chain_active=false).
+        let pool_depth = if chain_active {
+            match eth::fetch_pool_depth(
+                &self.http,
+                &dest_rpc,
+                &dest_bank,
+                &self.pool_depth_selector,
+            )
             .await
-        {
-            Some(depth) if depth >= event.amount => {} // sufficient — proceed
-            Some(depth) => {
+            {
+                Some(d) => d,
+                None => {
+                    warn!(
+                        src = %event.source_event_hash,
+                        "hot_path: could not fetch pool depth — aborting relay"
+                    );
+                    return;
+                }
+            }
+        } else {
+            U256::ZERO // placeholder; evaluate_relay_eligibility short-circuits on inactive chain
+        };
+
+        // 5. Domain eligibility decision — pure, infra-free.
+        match evaluate_relay_eligibility(chain_active, pool_depth, event.amount) {
+            RelayDecision::Approved => {}
+            RelayDecision::RejectedInactiveChain => {
                 warn!(
-                    src = event.source_event_hash,
-                    dest_chain = event.dest_chain_id,
-                    %event.amount,
-                    %depth,
-                    "hot_path: rejected — insufficient pool depth"
+                    src = %event.source_event_hash,
+                    dest_chain = event.dest_chain_id.0,
+                    "hot_path: rejected — destination chain not active"
                 );
-                self.relay_repo.insert_relay_log(&event, None, RelayStatus::RejectedInsufficientDepth)
+                self.relay_repo
+                    .insert_relay_log(&event, None, RelayStatus::RejectedInactiveChain)
                     .await;
                 return;
             }
-            None => {
+            RelayDecision::RejectedInsufficientDepth => {
                 warn!(
-                    src = event.source_event_hash,
-                    "hot_path: could not fetch pool depth — aborting relay"
+                    src = %event.source_event_hash,
+                    dest_chain = event.dest_chain_id.0,
+                    %event.amount,
+                    %pool_depth,
+                    "hot_path: rejected — insufficient pool depth"
                 );
+                self.relay_repo
+                    .insert_relay_log(&event, None, RelayStatus::RejectedInsufficientDepth)
+                    .await;
                 return;
             }
         }
 
-        // 4. Record pending.
+        // 6. Record pending.
         self.relay_repo.insert_relay_log(&event, None, RelayStatus::Pending).await;
 
-        // 5. Submit with retry.
+        // 7. Submit with retry.
         match self
             .submit_release_with_retry(&dest_rpc, &dest_bank, &event)
             .await
         {
             Ok(tx_hash) => {
                 info!(
-                    src = event.source_event_hash,
-                    dest_tx = tx_hash,
+                    src = %event.source_event_hash,
+                    dest_tx = %tx_hash,
                     "hot_path: relay completed"
                 );
                 self.relay_repo.update_relay_log(&event.source_event_hash, &tx_hash, RelayStatus::Completed)
@@ -340,7 +362,7 @@ impl HotPath {
             }
             Err(e) => {
                 error!(
-                    src = event.source_event_hash,
+                    src = %event.source_event_hash,
                     err = %e,
                     "hot_path: relay failed after retries"
                 );
@@ -354,7 +376,7 @@ impl HotPath {
         rpc_url: &str,
         bank_addr: &str,
         event: &HotPathEvent,
-    ) -> Result<String, TxError> {
+    ) -> Result<TxHash, TxError> {
         let key = self
             .relayer_key
             .as_ref()
@@ -394,8 +416,8 @@ impl HotPath {
         bank_addr: &str,
         event: &HotPathEvent,
         key: &SigningKey,
-        chain_id: u64,
-    ) -> Result<String, TxError> {
+        chain_id: ChainId,
+    ) -> Result<TxHash, TxError> {
         let relayer_addr = self
             .relayer_address
             .ok_or(TxError::MissingKey)?;
@@ -416,7 +438,7 @@ impl HotPath {
             .ok_or(TxError::InvalidAddress)?;
 
         let raw_hex = eth::sign_eip1559_tx(
-            chain_id,
+            chain_id.0,
             nonce,
             max_priority_fee,
             max_fee,
@@ -430,9 +452,9 @@ impl HotPath {
         // Advance cached nonce before sending so concurrent calls don't reuse it.
         self.nonce_cache.lock().await.insert(chain_id, nonce + 1);
 
-        let tx_hash = eth::send_raw_transaction(&self.http, rpc_url, &raw_hex).await?;
-        eth::wait_for_receipt(&self.http, rpc_url, &tx_hash, MAX_TX_WAIT).await?;
-        Ok(tx_hash)
+        let tx_hash_str = eth::send_raw_transaction(&self.http, rpc_url, &raw_hex).await?;
+        eth::wait_for_receipt(&self.http, rpc_url, &tx_hash_str, MAX_TX_WAIT).await?;
+        Ok(TxHash(tx_hash_str))
     }
 
     // ── Nonce helper ─────────────────────────────────────────────────────────
@@ -440,7 +462,7 @@ impl HotPath {
     async fn get_nonce(
         &self,
         rpc_url: &str,
-        chain_id: u64,
+        chain_id: ChainId,
         addr: &Address,
     ) -> Result<u64, TxError> {
         {
@@ -454,7 +476,7 @@ impl HotPath {
 
     // ── Event parsing ─────────────────────────────────────────────────────────
 
-    fn parse_hot_path_event(&self, log: &eth::RpcLog, source_chain_id: u64) -> Option<HotPathEvent> {
+    fn parse_hot_path_event(&self, log: &eth::RpcLog, source_chain_id: ChainId) -> Option<HotPathEvent> {
         // topics[0] = event selector
         // topics[1] = indexed sender   (address, left-padded to 32 bytes)
         // topics[2] = indexed to       (address, left-padded to 32 bytes)
@@ -482,13 +504,13 @@ impl HotPath {
         let amount_bytes: [u8; 32] = data[0..32].try_into().ok()?;
         let amount = U256::from_be_bytes(amount_bytes);
         // uint256 destinationChainId: right-aligned in its 32-byte slot (bytes 32..64).
-        let dest_chain_id = u64::from_be_bytes(data[56..64].try_into().ok()?);
+        let dest_chain_id = ChainId(u64::from_be_bytes(data[56..64].try_into().ok()?));
         let event_id = B256::from_slice(&data[64..96]);
         // data[96..128] = fee (reserved, currently 0 — ignored)
 
         Some(HotPathEvent {
             source_chain_id,
-            source_event_hash: log.transaction_hash.clone(),
+            source_event_hash: EventHash(log.transaction_hash.clone()),
             sender,
             recipient,
             amount,
@@ -497,4 +519,3 @@ impl HotPath {
         })
     }
 }
-

@@ -265,3 +265,103 @@ pub async fn wait_for_receipt_logs(
         tokio::time::sleep(Duration::from_millis(500)).await;
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_primitives::U256;
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    #[tokio::test]
+    async fn fetch_block_number_returns_parsed_value() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(serde_json::json!({"jsonrpc":"2.0","id":1,"result":"0x100"})),
+            )
+            .mount(&server)
+            .await;
+        let http = reqwest::Client::new();
+        let result = fetch_block_number(&http, &server.uri()).await;
+        assert_eq!(result, Some(256));
+    }
+
+    #[tokio::test]
+    async fn fetch_block_number_returns_none_on_error_response() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/"))
+            .respond_with(ResponseTemplate::new(500))
+            .mount(&server)
+            .await;
+        let http = reqwest::Client::new();
+        assert!(fetch_block_number(&http, &server.uri()).await.is_none());
+    }
+
+    #[tokio::test]
+    async fn fetch_pool_depth_returns_parsed_u256() {
+        // 1_000_000 = 0xF4240, padded to 32 bytes big-endian
+        let depth_hex = "0x00000000000000000000000000000000000000000000000000000000000f4240";
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(serde_json::json!({"jsonrpc":"2.0","id":1,"result": depth_hex})),
+            )
+            .mount(&server)
+            .await;
+        let http = reqwest::Client::new();
+        let selector = [0x00u8; 4];
+        let result = fetch_pool_depth(&http, &server.uri(), "0xBankContract", &selector).await;
+        assert_eq!(result, Some(U256::from(1_000_000u64)));
+    }
+
+    #[tokio::test]
+    async fn fetch_pool_depth_returns_none_on_short_result() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(serde_json::json!({"jsonrpc":"2.0","id":1,"result":"0x1234"})),
+            )
+            .mount(&server)
+            .await;
+        let http = reqwest::Client::new();
+        let selector = [0x00u8; 4];
+        assert!(fetch_pool_depth(&http, &server.uri(), "0xBankContract", &selector).await.is_none());
+    }
+
+    #[tokio::test]
+    async fn fetch_logs_returns_empty_vec_on_error() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/"))
+            .respond_with(ResponseTemplate::new(500))
+            .mount(&server)
+            .await;
+        let http = reqwest::Client::new();
+        let logs = fetch_logs(&http, &server.uri(), "0xAddr", "0xtopic", 0, 100).await;
+        assert!(logs.is_empty());
+    }
+
+    #[tokio::test]
+    async fn fetch_logs_returns_empty_result_array() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(serde_json::json!({"jsonrpc":"2.0","id":1,"result":[]})),
+            )
+            .mount(&server)
+            .await;
+        let http = reqwest::Client::new();
+        let logs = fetch_logs(&http, &server.uri(), "0xAddr", "0xtopic", 0, 100).await;
+        assert!(logs.is_empty());
+    }
+}
