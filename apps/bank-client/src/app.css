@@ -3,28 +3,41 @@
 
 @import "tailwindcss";
 
+@theme {
+  --color-white: #fff;
+  --color-black: #000;
+  --color-brown: #1F1F1F;
+  --color-warm: #D1CFBF;
+  --color-hue: #F76F53;
+  --color-lichen: #2E6F40;
+  --color-lush: #CFFFDC;
+  --color-tropic: #253D2C;
+  --color-success: #68BA7F;
+  --color-error: #fc3c3c;
+  --color-disabled: #f8f7f7;
+  --color-info: #0b63a2;
+
+  --font-display: 'Satoshi', ui-sans-serif, system-ui, sans-serif;
+}
+
 @source "../src/**/*.{ts,tsx,js,jsx}";
 
-* {
-  margin: 0;
-  padding: 0;
-  box-sizing: border-box;
-}
+@layer base {
+  body {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background: #141414;
+    color: #D1CFBF;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
 
-body {
-  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-  background: #141414;
-  color: #D1CFBF;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-}
+  h1, h2, h3, h4 {
+    font-family: 'Satoshi', -apple-system, BlinkMacSystemFont, sans-serif;
+  }
 
-h1, h2, h3, h4 {
-  font-family: 'Satoshi', -apple-system, BlinkMacSystemFont, sans-serif;
-}
-
-input, textarea {
-  user-select: text;
+  input, textarea {
+    user-select: text;
+  }
 }
 
 /* Smooth page transitions */
