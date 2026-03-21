@@ -3,9 +3,11 @@ pragma solidity ^0.8.24;
 
 import {AccessControlUpgradeable} from "@openzeppelin/contracts-upgradeable/access/AccessControlUpgradeable.sol";
 import {PausableUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
+import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {IBurnMintERC20} from "./interfaces/IBurnMintERC20.sol";
 
@@ -22,6 +24,7 @@ contract Bank is
     Initializable,
     AccessControlUpgradeable,
     PausableUpgradeable,
+    ReentrancyGuard,
     UUPSUpgradeable
 {
     using SafeERC20 for IERC20;
@@ -32,6 +35,8 @@ contract Bank is
     error ZeroAmount();
     error InsufficientPoolLiquidity();
     error TransferAlreadyReleased(bytes32 sourceEventHash);
+    error TokenNotAllowed(address token);
+    error InvalidTokenDecimals(address token, uint8 decimals);
 
     // ── Roles ──────────────────────────────────────────────────────────
 
@@ -65,6 +70,12 @@ contract Bank is
     /// @notice Emitted when the fee collector address is updated.
     event FeeCollectorUpdated(address indexed feeCollector);
 
+    /// @notice Emitted when a token is added to the deposit/withdrawal allowlist.
+    event TokenAllowed(address indexed token);
+
+    /// @notice Emitted when a token is removed from the deposit/withdrawal allowlist.
+    event TokenDisallowed(address indexed token);
+
     // ── State ──────────────────────────────────────────────────────────
 
     /// @notice The SyncUSD token this Bank mints/burns.
@@ -78,6 +89,9 @@ contract Bank is
 
     /// @notice sourceEventHash → true once releaseHotPath has been executed (idempotency guard).
     mapping(bytes32 => bool) public released;
+
+    /// @notice Tokens approved for deposit and withdrawal.
+    mapping(address => bool) public allowedTokens;
 
     // ── Constructor ────────────────────────────────────────────────────
 
@@ -116,11 +130,14 @@ contract Bank is
 
     /// @notice Escrows `underlyingToken` and mints equivalent SyncUSD to the caller.
     /// @dev Caller must approve this contract to spend `amount` of `underlyingToken`.
-    ///      Fee is reserved and currently set to 0.
+    ///      Token must be on the allowlist and have exactly 6 decimals.
     /// @param underlyingToken The accepted collateral token (e.g. USDC).
     /// @param amount          Amount of underlying token to deposit.
-    function deposit(address underlyingToken, uint256 amount) external whenNotPaused {
+    function deposit(address underlyingToken, uint256 amount) external whenNotPaused nonReentrant {
+        if (!allowedTokens[underlyingToken]) revert TokenNotAllowed(underlyingToken);
         if (amount == 0) revert ZeroAmount();
+        uint8 decimals = IERC20Metadata(underlyingToken).decimals();
+        if (decimals != 6) revert InvalidTokenDecimals(underlyingToken, decimals);
         IERC20(underlyingToken).safeTransferFrom(msg.sender, address(this), amount);
         syncUSD.mint(msg.sender, amount);
         emit Deposited(msg.sender, underlyingToken, amount);
@@ -128,11 +145,14 @@ contract Bank is
 
     /// @notice Burns the caller's SyncUSD and releases equivalent `underlyingToken`.
     /// @dev Caller must approve this contract to spend `amount` of SyncUSD.
-    ///      Fee is reserved and currently set to 0.
+    ///      Token must be on the allowlist and have exactly 6 decimals.
     /// @param underlyingToken The underlying token to release (e.g. USDC).
     /// @param amount          Amount of SyncUSD to burn / underlying to receive.
-    function withdraw(address underlyingToken, uint256 amount) external whenNotPaused {
+    function withdraw(address underlyingToken, uint256 amount) external whenNotPaused nonReentrant {
+        if (!allowedTokens[underlyingToken]) revert TokenNotAllowed(underlyingToken);
         if (amount == 0) revert ZeroAmount();
+        uint8 decimals = IERC20Metadata(underlyingToken).decimals();
+        if (decimals != 6) revert InvalidTokenDecimals(underlyingToken, decimals);
         syncUSD.burnFrom(msg.sender, amount);
         IERC20(underlyingToken).safeTransfer(msg.sender, amount);
         emit Withdrawn(msg.sender, underlyingToken, amount);
@@ -147,6 +167,7 @@ contract Bank is
     function transferHotPath(address to, uint256 amount, uint256 destinationChainId)
         external
         whenNotPaused
+        nonReentrant
     {
         if (to == address(0)) revert ZeroAddress();
         if (amount == 0) revert ZeroAmount();
@@ -169,6 +190,7 @@ contract Bank is
     function releaseHotPath(address to, uint256 amount, bytes32 sourceEventHash)
         external
         whenNotPaused
+        nonReentrant
         onlyRole(RELAYER_ROLE)
     {
         if (to == address(0)) revert ZeroAddress();
@@ -194,6 +216,19 @@ contract Bank is
     function setFeeCollector(address feeCollector_) external onlyRole(ADMIN_ROLE) {
         feeCollector = feeCollector_;
         emit FeeCollectorUpdated(feeCollector_);
+    }
+
+    /// @notice Adds a token to the deposit/withdrawal allowlist. Restricted to ADMIN_ROLE.
+    function allowToken(address token) external onlyRole(ADMIN_ROLE) {
+        if (token == address(0)) revert ZeroAddress();
+        allowedTokens[token] = true;
+        emit TokenAllowed(token);
+    }
+
+    /// @notice Removes a token from the deposit/withdrawal allowlist. Restricted to ADMIN_ROLE.
+    function disallowToken(address token) external onlyRole(ADMIN_ROLE) {
+        allowedTokens[token] = false;
+        emit TokenDisallowed(token);
     }
 
     // ── Pause ──────────────────────────────────────────────────────────

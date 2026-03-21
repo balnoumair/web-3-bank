@@ -9,12 +9,14 @@ import {Bank} from "../src/Bank.sol";
 /// @notice Grants post-deployment roles so the contracts can interact:
 ///   1. MINTER_ROLE on SyncUSD  → Bank proxy  (deposit mints SyncUSD)
 ///   2. RELAYER_ROLE on Bank    → relayer EOA/contract
+///   3. allowToken(USDC)        → Bank proxy  (whitelist USDC for deposit/withdrawal)
 ///
 /// Required env vars:
 ///   DEPLOYER_PRIVATE_KEY   — must hold DEFAULT_ADMIN_ROLE on both contracts
 ///   SYNC_USD_PROXY         — SyncUSD proxy address
 ///   BANK_PROXY             — Bank proxy address
 ///   RELAYER_ADDRESS        — address that will call releaseHotPath
+///   USDC_ADDRESS           — USDC token address on this chain
 ///
 /// Usage (run after both proxy deployments):
 ///   forge script script/AssignRoles.s.sol --rpc-url base_sepolia --broadcast
@@ -25,6 +27,7 @@ contract AssignRoles is Script {
         address syncUsdProxy   = vm.envAddress("SYNC_USD_PROXY");
         address bankProxy      = vm.envAddress("BANK_PROXY");
         address relayer        = vm.envAddress("RELAYER_ADDRESS");
+        address usdc           = vm.envAddress("USDC_ADDRESS");
 
         SyncUSD syncUsd = SyncUSD(syncUsdProxy);
         Bank    bank    = Bank(bankProxy);
@@ -42,6 +45,10 @@ contract AssignRoles is Script {
         bank.grantRole(RELAYER_ROLE, relayer);
         console2.log("Granted RELAYER_ROLE on Bank    to relayer  :", relayer);
 
+        // Whitelist USDC as an accepted deposit/withdrawal token
+        bank.allowToken(usdc);
+        console2.log("Allowed token on Bank               (USDC)  :", usdc);
+
         vm.stopBroadcast();
 
         // ── Verification ──────────────────────────────────────────────
@@ -52,6 +59,10 @@ contract AssignRoles is Script {
         require(
             bank.hasRole(RELAYER_ROLE, relayer),
             "AssignRoles: RELAYER_ROLE not set"
+        );
+        require(
+            bank.allowedTokens(usdc),
+            "AssignRoles: USDC not allowed"
         );
 
         console2.log("Role assignment verified.");

@@ -79,12 +79,6 @@ importers:
         specifier: ^4.3.6
         version: 4.3.6
 
-  packages/cre-contracts:
-    dependencies:
-      '@repo/shared-types':
-        specifier: workspace:*
-        version: link:../shared-types
-
   packages/eslint-config:
     dependencies:
       '@eslint/eslintrc':
@@ -115,6 +109,12 @@ importers:
       typescript-eslint:
         specifier: ^8.25.0
         version: 8.26.1(eslint@9.22.0(jiti@2.4.2))(typescript@5.8.2)
+
+  packages/onchain:
+    dependencies:
+      '@repo/shared-types':
+        specifier: workspace:*
+        version: link:../shared-types
 
   packages/shared-types:
     dependencies:

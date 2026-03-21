@@ -84,6 +84,10 @@ contract BankIntegration is Test {
         vm.prank(admin);
         bank.grantRole(relayerRole, relayer);
 
+        // Allow USDC for deposit/withdrawal
+        vm.prank(admin);
+        bank.allowToken(address(usdc));
+
         // Seed alice with USDC
         usdc.mint(alice, DEPOSIT_AMOUNT * 10);
     }
