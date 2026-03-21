@@ -7,6 +7,7 @@ import { Dynamic } from "solid-js/web";
 interface ButtonWrapperProps
   extends PrimitveButtonProps,
     JSX.ButtonHTMLAttributes<HTMLButtonElement> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   asChild?: keyof JSX.IntrinsicElements | Component<any>;
   children?: JSX.Element;
   ref?: (el: ButtonElement) => void;

@@ -1,6 +1,6 @@
 // vite.config.ts
 import { defineConfig } from "vite";
-import path, { resolve } from "path";
+import path from "path";
 import solidPlugin from "vite-plugin-solid";
 import tailwindcss from "@tailwindcss/vite";
 
