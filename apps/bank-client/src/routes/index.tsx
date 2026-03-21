@@ -1,231 +1,347 @@
 import { Title } from "@solidjs/meta";
+import { createSignal, For, Show } from "solid-js";
+import { useAuth } from "~/contexts/auth-context";
+import { useBalance } from "~/hooks/use-balance";
+import { useTransfers } from "~/hooks/use-transfers";
+import { useDeposit } from "~/hooks/use-deposit";
+import { useWithdraw } from "~/hooks/use-withdraw";
+import { useTransfer } from "~/hooks/use-transfer";
+import { useTransferCrossChain } from "~/hooks/use-transfer-cross-chain";
+import { formatUsd, formatDate, truncateAddress } from "~/lib/format";
+import AnimatedNumber from "~/components/AnimatedNumber";
+import Skeleton from "~/components/Skeleton";
+import TransactionModal, { type TransactionType } from "~/components/TransactionModal";
 
 export default function Home() {
-  const cardStyle = {
-    'background-color': '#1f1f1f',
-    border: '1px solid rgba(255, 255, 255, 0.06)',
-    'border-radius': '1rem',
-    padding: '1.5rem',
+  const auth = useAuth();
+  const balance = useBalance();
+  const transfers = useTransfers(8);
+
+  const userAddress = () =>
+    auth.user()?.tempoAddress as `0x${string}` | undefined;
+
+  const deposit = useDeposit(userAddress);
+  const withdraw = useWithdraw(userAddress);
+  const transfer = useTransfer(userAddress);
+  const crossChainTransfer = useTransferCrossChain(userAddress);
+
+  const [modalType, setModalType] = createSignal<TransactionType | null>(null);
+
+  const balanceNumber = () => {
+    const raw = balance.data;
+    if (!raw) return 0;
+    return Number(raw) / 1e6; // SyncUSD has 6 decimals
   };
 
-  const gridStyle = {
-    display: 'grid',
-    'grid-template-columns': '2fr 1fr',
-    gap: '1.5rem',
+  const handleModalSubmit = async (params: {
+    amount: bigint;
+    to?: `0x${string}`;
+    destinationChainId?: bigint;
+  }) => {
+    const type = modalType();
+    if (!type) throw new Error("No modal type");
+
+    switch (type) {
+      case "deposit":
+        return deposit.mutateAsync({ amount: params.amount });
+      case "withdraw":
+        return withdraw.mutateAsync({ amount: params.amount });
+      case "send":
+        if (!params.to) throw new Error("Recipient required");
+        return transfer.mutateAsync({ to: params.to, amount: params.amount });
+      case "send-cross-chain":
+        if (!params.to || !params.destinationChainId)
+          throw new Error("Recipient and chain required");
+        return crossChainTransfer.mutateAsync({
+          to: params.to,
+          amount: params.amount,
+          destinationChainId: params.destinationChainId,
+        });
+    }
   };
-
-  const actionCardStyle = {
-    'background-color': '#1f1f1f',
-    border: '1px solid rgba(255, 255, 255, 0.06)',
-    'border-radius': '1rem',
-    padding: '1.5rem',
-    cursor: 'pointer',
-    transition: 'all 0.2s',
-  };
-
-  const actionCardGreenStyle = {
-    ...actionCardStyle,
-    background: 'linear-gradient(135deg, #2d5f4d 0%, #1f4939 100%)',
-  };
-
-  const chartContainerStyle = {
-    'margin-top': '1.5rem',
-    height: '8rem',
-    'background-color': '#242424',
-    'border-radius': '0.5rem',
-    padding: '1rem',
-    display: 'flex',
-    'align-items': 'flex-end',
-    'justify-content': 'space-between',
-    gap: '0.5rem',
-  };
-
-  const barStyle = (height: string) => ({
-    flex: '1',
-    height,
-    background: 'linear-gradient(to top, rgba(45, 95, 77, 0.5), rgba(45, 95, 77, 0.3))',
-    'border-radius': '0.25rem 0.25rem 0 0',
-  });
-
-  const activityItemStyle = {
-    display: 'flex',
-    'align-items': 'center',
-    gap: '1rem',
-    padding: '0.75rem',
-    'border-radius': '0.5rem',
-    transition: 'background-color 0.2s',
-  };
-
-  const transactions = [
-    { emoji: '🍎', name: 'Apple Store, Regent St.', type: 'Electronics', date: '24 Oct, 18:40', amount: -1299.00, status: 'COMPLETED' },
-    { emoji: '🔵', name: 'Circle Yield Deposit', type: 'Internal Transfer', date: '23 Oct, 09:15', amount: 5000.00, status: 'COMPLETED' },
-    { emoji: '☕', name: 'Artisan Coffee Co.', type: 'Food & Drink', date: '23 Oct, 08:02', amount: -4.50, status: 'PENDING' },
-    { emoji: '👤', name: 'Transfer to Sarah M.', type: 'P2P Payment', date: '22 Oct, 18:55', amount: -450.00, status: 'COMPLETED' },
-  ];
-
-  const assets = [
-    { symbol: '₮', name: 'USDT', fullName: 'Tether USD', amount: 89421.00, change: 2.1, color: '#26a69a' },
-    { symbol: '◈', name: 'DAI', fullName: 'Dai Stablecoin', amount: 54120.10, change: 1.8, color: '#f5a623' },
-    { symbol: '⬡', name: 'USDC', fullName: 'USD Coin', amount: 105051.00, change: 3.2, color: '#2775ca' },
-  ];
 
   return (
-    <main>
-      <Title>Dashboard - StableBank</Title>
+    <div class="animate-in">
+      <Title>Dashboard - Web3Bank</Title>
 
-      <div style={gridStyle}>
-        {/* Left Column - Portfolio Card */}
-        <div>
-          <div style={cardStyle}>
-            <div style={{ 'margin-bottom': '1rem' }}>
-              <div style={{ 'font-size': '0.875rem', color: '#9ca3af', 'margin-bottom': '0.25rem' }}>
-                Total Portfolio Value
-              </div>
-              <div style={{ display: 'flex', 'align-items': 'baseline', gap: '0.75rem' }}>
-                <h2 style={{ 'font-size': '2.5rem', 'font-weight': 'bold', color: 'white' }}>
-                  $248,592.10
-                </h2>
-                <span style={{ 'font-size': '0.875rem', color: '#9ca3af' }}>USDC</span>
-                <span style={{ 'font-size': '0.875rem', 'font-weight': '500', color: '#10b981', 'margin-left': 'auto' }}>
-                  +14.2%
-                </span>
-              </div>
-            </div>
-
-            {/* Chart */}
-            <div style={chartContainerStyle}>
-              <div style={barStyle('4rem')}></div>
-              <div style={barStyle('3rem')}></div>
-              <div style={barStyle('5rem')}></div>
-              <div style={barStyle('2.5rem')}></div>
-              <div style={barStyle('4.5rem')}></div>
-              <div style={barStyle('3.5rem')}></div>
-              <div style={barStyle('4.75rem')}></div>
-            </div>
-
-            {/* Day labels */}
-            <div style={{ display: 'flex', 'justify-content': 'space-between', 'margin-top': '0.5rem', padding: '0 1rem', 'font-size': '0.75rem', color: '#6b7280' }}>
-              <span>MON</span>
-              <span>TUE</span>
-              <span>WED</span>
-              <span>THU</span>
-              <span>FRI</span>
-              <span>SAT</span>
-              <span>SUN</span>
-            </div>
-          </div>
-
-          {/* Recent Activity */}
-          <div style={{ ...cardStyle, 'margin-top': '1.5rem' }}>
-            <div style={{ display: 'flex', 'align-items': 'center', 'justify-content': 'space-between', 'margin-bottom': '1.5rem' }}>
-              <h3 style={{ 'font-size': '1.125rem', 'font-weight': '600', color: 'white' }}>Recent Activity</h3>
-              <a href="#" style={{ 'font-size': '0.875rem', color: '#10b981', 'text-decoration': 'none' }}>
-                View all history →
-              </a>
-            </div>
-
-            <div style={{ display: 'flex', 'flex-direction': 'column', gap: '0.5rem' }}>
-              {transactions.map((tx) => (
-                <div style={activityItemStyle}>
-                  <div style={{ width: '2.5rem', height: '2.5rem', 'border-radius': '50%', 'background-color': '#242424', display: 'flex', 'align-items': 'center', 'justify-content': 'center', 'font-size': '1.125rem', 'flex-shrink': '0' }}>
-                    {tx.emoji}
-                  </div>
-                  <div style={{ flex: '1', 'min-width': '0' }}>
-                    <div style={{ 'font-weight': '500', color: 'white', 'font-size': '0.875rem' }}>{tx.name}</div>
-                    <div style={{ 'font-size': '0.75rem', color: '#6b7280' }}>
-                      {tx.type} • {tx.date}
-                    </div>
-                  </div>
-                  <div style={{ 'text-align': 'right', 'flex-shrink': '0' }}>
-                    <div style={{ 'font-weight': '600', 'font-size': '0.875rem', color: tx.amount > 0 ? '#10b981' : '#ef4444' }}>
-                      {tx.amount > 0 ? '+' : ''}{tx.amount < 0 ? '-' : ''}${Math.abs(tx.amount).toFixed(2)}
-                    </div>
-                    <div style={{ 'font-size': '0.75rem', 'text-transform': 'uppercase', color: tx.status === 'COMPLETED' ? '#10b981' : '#f59e0b' }}>
-                      • {tx.status}
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-
-        {/* Right Column - Action Buttons */}
-        <div style={{ display: 'flex', 'flex-direction': 'column', gap: '0.75rem' }}>
-          <div style={actionCardGreenStyle}>
-            <div style={{ display: 'flex', 'align-items': 'center', gap: '0.75rem' }}>
-              <div style={{ width: '2.5rem', height: '2.5rem', 'border-radius': '0.5rem', 'background-color': 'rgba(255, 255, 255, 0.1)', display: 'flex', 'align-items': 'center', 'justify-content': 'center' }}>
-                <svg style={{ width: '1.25rem', height: '1.25rem', color: 'white' }} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3" />
-                </svg>
-              </div>
-              <div>
-                <div style={{ color: 'white', 'font-weight': '600' }}>Send Funds</div>
-                <div style={{ 'font-size': '0.875rem', color: 'rgba(255, 255, 255, 0.7)' }}>Transfer USDC to any wallet</div>
-              </div>
-            </div>
-          </div>
-
-          <div style={actionCardStyle}>
-            <div style={{ display: 'flex', 'align-items': 'center', gap: '0.75rem' }}>
-              <div style={{ width: '2.5rem', height: '2.5rem', 'border-radius': '0.5rem', 'background-color': '#242424', display: 'flex', 'align-items': 'center', 'justify-content': 'center' }}>
-                <svg style={{ width: '1.25rem', height: '1.25rem', color: '#9ca3af' }} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                </svg>
-              </div>
-              <div>
-                <div style={{ color: 'white', 'font-weight': '600' }}>Request Payment</div>
-                <div style={{ 'font-size': '0.875rem', color: '#6b7280' }}>Create a payment link or QR</div>
-              </div>
-            </div>
-          </div>
-        </div>
+      {/* Greeting */}
+      <div class="mb-8">
+        <h1 class="text-2xl font-bold text-white font-[Satoshi] tracking-tight">
+          <Show when={auth.user()} fallback="Dashboard">
+            {(user) => <>Hello, {user().displayName}</>}
+          </Show>
+        </h1>
+        <p class="text-warm/50 text-sm mt-1">
+          Your stablecoin banking overview.
+        </p>
       </div>
 
-      {/* Bottom Section - Your Assets & Stable Savings */}
-      <div style={{ display: 'grid', 'grid-template-columns': '1fr 1fr', gap: '1.5rem', 'margin-top': '1.5rem' }}>
-        {/* Your Assets */}
-        <div style={cardStyle}>
-          <h3 style={{ 'font-size': '1.125rem', 'font-weight': '600', color: 'white', 'margin-bottom': '1rem' }}>
-            Your Assets
-          </h3>
-          <div style={{ display: 'flex', 'flex-direction': 'column', gap: '0.75rem' }}>
-            {assets.map((asset) => (
-              <div style={{ display: 'flex', 'align-items': 'center', 'justify-content': 'space-between', padding: '0.75rem', 'border-radius': '0.5rem', 'background-color': 'rgba(255, 255, 255, 0.02)' }}>
-                <div style={{ display: 'flex', 'align-items': 'center', gap: '0.75rem' }}>
-                  <div style={{ width: '2rem', height: '2rem', 'border-radius': '50%', 'background-color': `${asset.color}20`, display: 'flex', 'align-items': 'center', 'justify-content': 'center', color: asset.color, 'font-size': '0.875rem', 'font-weight': 'bold' }}>
-                    {asset.symbol}
-                  </div>
-                  <div>
-                    <div style={{ 'font-size': '0.875rem', 'font-weight': '500', color: 'white' }}>{asset.name}</div>
-                    <div style={{ 'font-size': '0.75rem', color: '#6b7280' }}>{asset.fullName}</div>
-                  </div>
-                </div>
-                <div style={{ 'text-align': 'right' }}>
-                  <div style={{ 'font-size': '0.875rem', 'font-weight': '600', color: 'white' }}>
-                    ${asset.amount.toLocaleString('en-US', { minimumFractionDigits: 2 })}
-                  </div>
-                  <div style={{ 'font-size': '0.75rem', color: '#10b981' }}>+{asset.change}%</div>
-                </div>
-              </div>
-            ))}
+      {/* Top row: Balance + Actions */}
+      <div class="grid grid-cols-[1fr_300px] gap-6 mb-6">
+        {/* Balance card */}
+        <div class="bg-[#1a1a1a] border border-warm/8 rounded-2xl p-6">
+          <div class="text-sm text-warm/50 mb-1">Total Balance</div>
+          <Show
+            when={!balance.isLoading}
+            fallback={<Skeleton height="3rem" width="200px" />}
+          >
+            <div class="flex items-baseline gap-3">
+              <AnimatedNumber
+                value={balanceNumber()}
+                prefix="$"
+                decimals={2}
+                class="text-4xl font-bold text-white font-[Satoshi] tracking-tight"
+              />
+              <span class="text-sm text-warm/40">SyncUSD</span>
+            </div>
+          </Show>
+
+          {/* Mini chart placeholder */}
+          <div class="mt-6 flex items-end gap-1.5 h-20">
+            {[40, 30, 55, 25, 50, 35, 52, 28, 48, 38, 58, 32].map(
+              (h) => (
+                <div
+                  class="flex-1 rounded-sm bg-gradient-to-t from-lichen/30 to-lichen/10 transition-all hover:from-lichen/50 hover:to-lichen/20"
+                  style={{ height: `${h}%` }}
+                />
+              ),
+            )}
+          </div>
+          <div class="flex justify-between mt-2 text-[10px] text-warm/25 px-0.5">
+            <span>Mon</span>
+            <span>Tue</span>
+            <span>Wed</span>
+            <span>Thu</span>
+            <span>Fri</span>
+            <span>Sat</span>
+            <span>Sun</span>
           </div>
         </div>
 
-        {/* Stable Savings */}
-        <div style={{ ...cardStyle, background: 'linear-gradient(135deg, #2d5f4d 0%, #1f4939 100%)', position: 'relative', overflow: 'hidden' }}>
-          <h3 style={{ 'font-size': '1.125rem', 'font-weight': '600', color: 'white', 'margin-bottom': '0.5rem' }}>
-            Stable Savings
-          </h3>
-          <p style={{ 'font-size': '0.875rem', color: 'rgba(255, 255, 255, 0.8)', 'margin-bottom': '1.5rem' }}>
-            Earn up to <span style={{ 'font-weight': 'bold', color: 'white' }}>4.5% APY</span> on your USDC holdings with our managed treasury accounts. Institutional-grade security.
-          </p>
-          <button style={{ padding: '0.625rem 1.25rem', 'background-color': 'rgba(255, 255, 255, 0.2)', color: 'white', border: '1px solid rgba(255, 255, 255, 0.2)', 'border-radius': '0.5rem', 'font-size': '0.875rem', 'font-weight': '500', cursor: 'pointer' }}>
-            Learn More
+        {/* Quick actions */}
+        <div class="flex flex-col gap-3">
+          <button
+            onClick={() => setModalType("deposit")}
+            class="flex items-center gap-3 bg-lichen/15 hover:bg-lichen/25 border border-lichen/20 rounded-xl p-4 text-left transition-all active:scale-[0.98] group"
+          >
+            <div class="w-10 h-10 rounded-lg bg-lichen/20 flex items-center justify-center group-hover:bg-lichen/30 transition-colors">
+              <svg class="w-5 h-5 text-lush" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m0 0l-4-4m4 4l4-4" />
+              </svg>
+            </div>
+            <div>
+              <div class="text-sm font-semibold text-white">Deposit</div>
+              <div class="text-xs text-warm/40">Add USDC to your account</div>
+            </div>
           </button>
-          <div style={{ position: 'absolute', right: '-2rem', bottom: '-2rem', width: '8rem', height: '8rem', 'background-color': 'rgba(255, 255, 255, 0.05)', 'border-radius': '50%' }}></div>
+
+          <button
+            onClick={() => setModalType("withdraw")}
+            class="flex items-center gap-3 bg-brown border border-warm/8 hover:border-warm/15 rounded-xl p-4 text-left transition-all active:scale-[0.98] group"
+          >
+            <div class="w-10 h-10 rounded-lg bg-warm/5 flex items-center justify-center group-hover:bg-warm/10 transition-colors">
+              <svg class="w-5 h-5 text-warm/60" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M12 20V4m0 0l-4 4m4-4l4 4" />
+              </svg>
+            </div>
+            <div>
+              <div class="text-sm font-semibold text-white">Withdraw</div>
+              <div class="text-xs text-warm/40">Withdraw USDC</div>
+            </div>
+          </button>
+
+          <button
+            onClick={() => setModalType("send")}
+            class="flex items-center gap-3 bg-brown border border-warm/8 hover:border-warm/15 rounded-xl p-4 text-left transition-all active:scale-[0.98] group"
+          >
+            <div class="w-10 h-10 rounded-lg bg-warm/5 flex items-center justify-center group-hover:bg-warm/10 transition-colors">
+              <svg class="w-5 h-5 text-warm/60" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M14 5l7 7m0 0l-7 7m7-7H3" />
+              </svg>
+            </div>
+            <div>
+              <div class="text-sm font-semibold text-white">Send</div>
+              <div class="text-xs text-warm/40">Transfer to any address</div>
+            </div>
+          </button>
+
+          <button
+            onClick={() => setModalType("send-cross-chain")}
+            class="flex items-center gap-3 bg-brown border border-warm/8 hover:border-warm/15 rounded-xl p-4 text-left transition-all active:scale-[0.98] group"
+          >
+            <div class="w-10 h-10 rounded-lg bg-warm/5 flex items-center justify-center group-hover:bg-warm/10 transition-colors">
+              <svg class="w-5 h-5 text-warm/60" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
+              </svg>
+            </div>
+            <div>
+              <div class="text-sm font-semibold text-white">Cross-Chain</div>
+              <div class="text-xs text-warm/40">Send to another chain</div>
+            </div>
+          </button>
         </div>
       </div>
-    </main>
+
+      {/* Bottom row: Activity + Savings */}
+      <div class="grid grid-cols-[1fr_300px] gap-6">
+        {/* Recent activity */}
+        <div class="bg-[#1a1a1a] border border-warm/8 rounded-2xl p-6">
+          <div class="flex items-center justify-between mb-5">
+            <h3 class="text-base font-bold text-white font-[Satoshi]">
+              Recent Activity
+            </h3>
+            <a href="#" class="text-xs text-hue hover:text-hue/80 transition-colors font-medium">
+              View all
+            </a>
+          </div>
+
+          <Show
+            when={!transfers.isLoading}
+            fallback={
+              <div class="flex flex-col gap-3">
+                <Skeleton height="3rem" />
+                <Skeleton height="3rem" />
+                <Skeleton height="3rem" />
+                <Skeleton height="3rem" />
+              </div>
+            }
+          >
+            <Show
+              when={transfers.data && transfers.data.length > 0}
+              fallback={
+                <div class="py-12 text-center">
+                  <p class="text-warm/30 text-sm">No transactions yet.</p>
+                  <p class="text-warm/20 text-xs mt-1">
+                    Deposit funds to get started.
+                  </p>
+                </div>
+              }
+            >
+              <div class="flex flex-col gap-1 stagger">
+                <For each={transfers.data}>
+                  {(tx) => {
+                    const isIncoming = () =>
+                      tx.to.toLowerCase() ===
+                      auth.user()?.tempoAddress?.toLowerCase();
+
+                    return (
+                      <div class="flex items-center gap-3 p-3 rounded-xl hover:bg-warm/3 transition-colors">
+                        {/* Icon */}
+                        <div
+                          class={`w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 ${
+                            isIncoming()
+                              ? 'bg-success/10 text-success'
+                              : 'bg-hue/10 text-hue'
+                          }`}
+                        >
+                          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                            <path
+                              stroke-linecap="round"
+                              stroke-linejoin="round"
+                              d={
+                                isIncoming()
+                                  ? "M12 4v16m0 0l-4-4m4 4l4-4"
+                                  : "M14 5l7 7m0 0l-7 7m7-7H3"
+                              }
+                            />
+                          </svg>
+                        </div>
+
+                        {/* Details */}
+                        <div class="flex-1 min-w-0">
+                          <div class="text-sm font-medium text-white">
+                            {isIncoming() ? "Received" : "Sent"}
+                          </div>
+                          <div class="text-xs text-warm/40 truncate">
+                            {isIncoming()
+                              ? `From ${truncateAddress(tx.from)}`
+                              : `To ${truncateAddress(tx.to)}`}{" "}
+                            &middot; {formatDate(tx.timestamp)}
+                          </div>
+                        </div>
+
+                        {/* Amount */}
+                        <div class="text-right flex-shrink-0">
+                          <div
+                            class={`text-sm font-semibold ${
+                              isIncoming() ? 'text-success' : 'text-white'
+                            }`}
+                          >
+                            {isIncoming() ? "+" : "-"}
+                            {formatUsd(tx.amount)}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  }}
+                </For>
+              </div>
+            </Show>
+          </Show>
+        </div>
+
+        {/* Right column: Savings card */}
+        <div class="flex flex-col gap-6">
+          <div class="bg-gradient-to-br from-tropic to-tropic/60 border border-lichen/20 rounded-2xl p-6 relative overflow-hidden">
+            <div class="absolute -right-8 -bottom-8 w-32 h-32 rounded-full bg-lichen/10" />
+            <div class="absolute -right-4 -bottom-4 w-20 h-20 rounded-full bg-lichen/10" />
+
+            <h3 class="text-base font-bold text-lush font-[Satoshi] mb-2">
+              Stable Savings
+            </h3>
+            <p class="text-sm text-warm/60 mb-4 relative z-10">
+              Earn up to{" "}
+              <span class="font-bold text-white">4.5% APY</span> on your
+              SyncUSD holdings.
+            </p>
+            <button class="relative z-10 px-4 py-2 bg-white/10 hover:bg-white/15 border border-white/10 rounded-lg text-sm font-medium text-white transition-all active:scale-[0.98]">
+              Learn More
+            </button>
+          </div>
+
+          {/* Network status */}
+          <div class="bg-[#1a1a1a] border border-warm/8 rounded-2xl p-6">
+            <h3 class="text-base font-bold text-white font-[Satoshi] mb-4">
+              Network
+            </h3>
+            <div class="flex flex-col gap-3">
+              <div class="flex items-center justify-between">
+                <span class="text-sm text-warm/60">Tempo</span>
+                <div class="flex items-center gap-1.5">
+                  <div class="w-1.5 h-1.5 rounded-full bg-success" />
+                  <span class="text-xs text-success">Active</span>
+                </div>
+              </div>
+              <div class="flex items-center justify-between">
+                <span class="text-sm text-warm/60">Base</span>
+                <div class="flex items-center gap-1.5">
+                  <div class="w-1.5 h-1.5 rounded-full bg-success" />
+                  <span class="text-xs text-success">Active</span>
+                </div>
+              </div>
+              <div class="flex items-center justify-between">
+                <span class="text-sm text-warm/60">Arbitrum</span>
+                <div class="flex items-center gap-1.5">
+                  <div class="w-1.5 h-1.5 rounded-full bg-success" />
+                  <span class="text-xs text-success">Active</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Transaction Modal */}
+      <Show when={modalType()}>
+        {(type) => (
+          <TransactionModal
+            type={type()}
+            isOpen={true}
+            onClose={() => setModalType(null)}
+            onSubmit={handleModalSubmit}
+          />
+        )}
+      </Show>
+    </div>
   );
 }

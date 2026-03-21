@@ -12,13 +12,13 @@
     "@solidjs/meta": "^0.29.4",
     "@solidjs/router": "^0.15.0",
     "@solidjs/start": "^1.1.0",
+    "@tanstack/solid-query": "^5.65.0",
     "solid-js": "^1.9.5",
+    "solid-transition-group": "^0.2.3",
+    "viem": "^2.23.0",
     "vinxi": "^0.5.3",
     "tailwindcss": "^4.0.9",
-    "@tailwindcss/vite": "^4.0.9",
-    "@simplewebauthn/browser": "^13.2.2",
-    "graphql": "^16.8.1",
-    "graphql-request": "^6.1.0"
+    "@tailwindcss/vite": "^4.0.9"
   },
   "devDependencies": {
     "@repo/eslint-config": "workspace:*",
