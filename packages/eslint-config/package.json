@@ -2,7 +2,8 @@
   "name": "@repo/eslint-config",
   "version": "1.0.0",
   "description": "This is the eslint config package.",
-  "main": "index.mjs",
+  "type": "module",
+  "main": "index.ts",
   "publishConfig": {
     "access": "public"
   },
