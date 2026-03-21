@@ -1,3 +1,8 @@
+//! PostgreSQL implementation of [`UserRepository`].
+//!
+//! Creates and retrieves user accounts from the `users` table.
+//! Display names default to an empty string when not provided.
+
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use sqlx::PgPool;

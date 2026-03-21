@@ -8,6 +8,7 @@ use uuid::Uuid;
 
 use crate::domain::entities::{Credential, User, UserWithCredential};
 use crate::domain::errors::DomainError;
+use crate::domain::validation::TempoAddress;
 
 #[async_trait]
 pub trait UserRepository: Send + Sync {
@@ -29,13 +30,13 @@ pub trait CredentialRepository: Send + Sync {
         user_id: Uuid,
         credential_id: &[u8],
         public_key: &[u8],
-        tempo_address: &str,
+        tempo_address: &TempoAddress,
     ) -> Result<Uuid, DomainError>;
 
     /// Look up a user by their Tempo address via the credentials table.
     async fn get_user_by_address(
         &self,
-        tempo_address: &str,
+        tempo_address: &TempoAddress,
     ) -> Result<Option<UserWithCredential>, DomainError>;
 
     /// List credentials for a user. When `active_only` is true, excludes

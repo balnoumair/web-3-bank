@@ -8,6 +8,7 @@ use alloy_primitives::U256;
 use async_trait::async_trait;
 
 use crate::domain::events::HotPathEvent;
+use crate::domain::newtypes::{ChainId, EventHash, OperationId, TxHash};
 use crate::domain::status::{AlertType, RelayStatus};
 
 // ── Relay repository (hot-path) ─────────────────────────────────────────────
@@ -15,30 +16,30 @@ use crate::domain::status::{AlertType, RelayStatus};
 #[async_trait]
 pub trait RelayRepository: Send + Sync {
     /// Check if a relay log already exists for this source event hash.
-    async fn relay_already_recorded(&self, source_event_hash: &str) -> bool;
+    async fn relay_already_recorded(&self, source_event_hash: &EventHash) -> bool;
 
     /// Insert a new relay log entry.
     async fn insert_relay_log(
         &self,
         event: &HotPathEvent,
-        dest_tx_hash: Option<&str>,
+        dest_tx_hash: Option<&TxHash>,
         status: RelayStatus,
     );
 
     /// Update a relay log entry with a destination tx hash and status.
     async fn update_relay_log(
         &self,
-        source_event_hash: &str,
-        dest_tx_hash: &str,
+        source_event_hash: &EventHash,
+        dest_tx_hash: &TxHash,
         status: RelayStatus,
     );
 
     /// Mark a relay log entry as failed.
-    async fn update_relay_log_failed(&self, source_event_hash: &str);
+    async fn update_relay_log_failed(&self, source_event_hash: &EventHash);
 
     /// Get the relay status for a source event hash. Returns `None` if
     /// no relay log exists.
-    async fn get_relay_status(&self, source_event_hash: &str) -> Option<String>;
+    async fn get_relay_status(&self, source_event_hash: &EventHash) -> Option<String>;
 }
 
 // ── Watcher repository ──────────────────────────────────────────────────────
@@ -61,27 +62,27 @@ pub trait WatcherRepository: Send + Sync {
 pub trait RebalanceRepository: Send + Sync {
     /// Returns true if a pending or submitted op for this chain pair
     /// was created within the last 24 hours.
-    async fn op_in_flight(&self, source_chain: u64, dest_chain: u64) -> bool;
+    async fn op_in_flight(&self, source_chain: ChainId, dest_chain: ChainId) -> bool;
 
     /// Insert a new rebalance operation in `pending` status.
     async fn insert_rebalance_op(
         &self,
-        op_id: &str,
-        source_chain: u64,
-        dest_chain: u64,
+        op_id: &OperationId,
+        source_chain: ChainId,
+        dest_chain: ChainId,
         amount: &U256,
     );
 
     /// Update a rebalance op to `submitted` with tx hash and optional CCIP ID.
     async fn update_rebalance_op_submitted(
         &self,
-        op_id: &str,
-        tx_hash: &str,
+        op_id: &OperationId,
+        tx_hash: &TxHash,
         ccip_message_id: Option<&str>,
     );
 
     /// Mark a rebalance op as `failed`.
-    async fn update_rebalance_op_failed(&self, op_id: &str);
+    async fn update_rebalance_op_failed(&self, op_id: &OperationId);
 }
 
 // ── Pool snapshot repository ────────────────────────────────────────────────
@@ -89,9 +90,9 @@ pub trait RebalanceRepository: Send + Sync {
 #[async_trait]
 pub trait PoolSnapshotRepository: Send + Sync {
     /// Record a pool depth snapshot for a chain.
-    async fn record_snapshot(&self, chain_id: u64, depth: &U256);
+    async fn record_snapshot(&self, chain_id: ChainId, depth: &U256);
 
     /// Get the latest pool depth for a chain. Returns `None` if no
     /// snapshot exists.
-    async fn get_latest_depth(&self, chain_id: i64) -> Option<String>;
+    async fn get_latest_depth(&self, chain_id: ChainId) -> Option<String>;
 }

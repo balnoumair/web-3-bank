@@ -1,3 +1,9 @@
+//! PostgreSQL implementation of [`WatcherRepository`].
+//!
+//! Persists watcher verification alerts in `treasury.watcher_alerts`.
+//! Each alert is keyed by the transfer ID hex and stores the alert type
+//! and a JSON detail blob.
+
 use async_trait::async_trait;
 use sqlx::PgPool;
 use tracing::error;
@@ -59,5 +65,52 @@ impl WatcherRepository for PgWatcherRepository {
             .iter()
             .map(|r| r.try_get::<i64, _>("id").unwrap_or(0).to_string())
             .collect())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::status::AlertType;
+    use sqlx::PgPool;
+
+    #[sqlx::test(migrations = "migrations")]
+    async fn insert_and_check_alert(pool: PgPool) {
+        let repo = PgWatcherRepository::new(pool);
+        let transfer_id = "0xdeadbeef";
+
+        assert!(!repo.already_verified(transfer_id).await);
+        repo.insert_alert(transfer_id, AlertType::Verified, r#"{"ok": true}"#).await;
+        assert!(repo.already_verified(transfer_id).await);
+    }
+
+    #[sqlx::test(migrations = "migrations")]
+    async fn insert_idempotent_on_conflict(pool: PgPool) {
+        let repo = PgWatcherRepository::new(pool);
+        let transfer_id = "0xdeadbeef2";
+
+        repo.insert_alert(transfer_id, AlertType::Verified, "{}").await;
+        repo.insert_alert(transfer_id, AlertType::Mismatch, "{}").await; // ON CONFLICT DO NOTHING
+        let ids = repo.get_alert_ids(10).await.unwrap();
+        // only one alert inserted
+        assert_eq!(ids.len(), 1);
+    }
+
+    #[sqlx::test(migrations = "migrations")]
+    async fn get_alert_ids_respects_limit(pool: PgPool) {
+        let repo = PgWatcherRepository::new(pool);
+        for i in 0..5 {
+            let id = format!("0xtx{i}");
+            repo.insert_alert(&id, AlertType::Verified, "{}").await;
+        }
+        let ids = repo.get_alert_ids(3).await.unwrap();
+        assert_eq!(ids.len(), 3);
+    }
+
+    #[sqlx::test(migrations = "migrations")]
+    async fn mismatch_alert_persisted(pool: PgPool) {
+        let repo = PgWatcherRepository::new(pool);
+        repo.insert_alert("0xmismatch", AlertType::Mismatch, r#"{"reason":"amount_mismatch"}"#).await;
+        assert!(repo.already_verified("0xmismatch").await);
     }
 }

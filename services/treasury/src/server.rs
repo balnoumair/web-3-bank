@@ -1,3 +1,8 @@
+//! gRPC server bootstrap.
+//!
+//! Initialises the database pool, constructs all service components, and
+//! starts the tonic gRPC server on the configured `GRPC_PORT`.
+
 use std::fs;
 use std::sync::Arc;
 

@@ -1,12 +1,20 @@
+//! gRPC handler implementation for the UserService.
+//!
+//! Bridges proto request/response types to the domain layer.
+//! All business rule validation (address format, aggregate root
+//! methods) is delegated to domain entities before any repository
+//! call is made.
+
 use std::sync::Arc;
 
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use tonic::{Request, Response, Status};
 use uuid::Uuid;
 
+use crate::domain::entities::Credential as DomainCredential;
 use crate::domain::errors::DomainError;
 use crate::domain::repository::{CredentialRepository, UserRepository};
-use crate::domain::validation::valid_tempo_address;
+use crate::domain::validation::TempoAddress;
 use crate::grpc::{
     user_service_server::UserService, AddCredentialRequest, AddCredentialResponse,
     CreateUserRequest, CreateUserResponse, Credential, GetUserByAddressRequest,
@@ -46,11 +54,15 @@ impl UserService for UserServiceImpl {
     ) -> Result<Response<CreateUserResponse>, Status> {
         let req = request.into_inner();
 
-        if !valid_tempo_address(&req.tempo_address) {
-            return Err(Status::invalid_argument(
-                "tempo_address must be a 0x-prefixed 40-char hex string",
-            ));
-        }
+        // Validate credential invariants via the domain constructor before
+        // touching the database.
+        let credential = DomainCredential::new(
+            uuid::Uuid::nil(), // placeholder; actual user_id assigned after user insert
+            req.credential_id.clone(),
+            req.public_key.clone(),
+            req.tempo_address.clone(),
+        )
+        .map_err(domain_err_to_status)?;
 
         let user_id = self
             .user_repo
@@ -61,9 +73,9 @@ impl UserService for UserServiceImpl {
         self.credential_repo
             .insert(
                 user_id,
-                &req.credential_id,
-                &req.public_key,
-                &req.tempo_address,
+                &credential.credential_id,
+                &credential.public_key,
+                &credential.tempo_address, // already a TempoAddress
             )
             .await
             .map_err(domain_err_to_status)?;
@@ -79,9 +91,12 @@ impl UserService for UserServiceImpl {
     ) -> Result<Response<GetUserByAddressResponse>, Status> {
         let req = request.into_inner();
 
+        let addr = TempoAddress::try_from(req.tempo_address.as_str())
+            .map_err(domain_err_to_status)?;
+
         let row = self
             .credential_repo
-            .get_user_by_address(&req.tempo_address)
+            .get_user_by_address(&addr)
             .await
             .map_err(domain_err_to_status)?
             .ok_or_else(|| Status::not_found("user not found for given tempo_address"))?;
@@ -90,7 +105,7 @@ impl UserService for UserServiceImpl {
             user_id: row.user_id.to_string(),
             display_name: row.display_name,
             status: row.status.to_string(),
-            tempo_address: row.tempo_address,
+            tempo_address: row.tempo_address.to_string(),
         }))
     }
 
@@ -111,7 +126,7 @@ impl UserService for UserServiceImpl {
             .into_iter()
             .map(|c| Credential {
                 credential_id: URL_SAFE_NO_PAD.encode(&c.credential_id),
-                tempo_address: c.tempo_address,
+                tempo_address: c.tempo_address.to_string(),
                 created_at: c.created_at.to_rfc3339(),
                 revoked: c.revoked_at.is_some(),
             })
@@ -131,24 +146,24 @@ impl UserService for UserServiceImpl {
         let user_id = Uuid::parse_str(&req.user_id)
             .map_err(|_| Status::invalid_argument("user_id must be a valid UUID"))?;
 
-        if !valid_tempo_address(&req.tempo_address) {
-            return Err(Status::invalid_argument(
-                "tempo_address must be a 0x-prefixed 40-char hex string",
-            ));
-        }
-
-        self.user_repo
+        let user = self
+            .user_repo
             .get_by_id(user_id)
             .await
             .map_err(domain_err_to_status)?
             .ok_or_else(|| Status::not_found("user not found"))?;
 
+        // Route through the aggregate root — enforces address validation.
+        let credential = user
+            .add_credential(req.credential_id.clone(), req.public_key.clone(), req.tempo_address.clone())
+            .map_err(domain_err_to_status)?;
+
         self.credential_repo
             .insert(
                 user_id,
-                &req.credential_id,
-                &req.public_key,
-                &req.tempo_address,
+                &credential.credential_id,
+                &credential.public_key,
+                &credential.tempo_address,
             )
             .await
             .map_err(domain_err_to_status)?;
