@@ -35,13 +35,14 @@ use std::time::Duration;
 
 use alloy_primitives::{keccak256, Address, B256, U256};
 use k256::ecdsa::SigningKey;
-use sqlx::PgPool;
 use tokio::sync::{Mutex, RwLock};
 use tonic::{Request, Response, Status};
 use tracing::{error, info, warn};
 
 use crate::config::Config;
 use crate::domain::events::{InitiatedEvent, ReleasedEvent};
+use crate::domain::repository::WatcherRepository;
+use crate::domain::status::AlertType;
 use crate::error::TxError;
 use crate::eth;
 use crate::proto::treasury::{GetWatcherAlertsRequest, GetWatcherAlertsResponse};
@@ -60,7 +61,7 @@ const PAUSE_GAS_LIMIT: u64 = 80_000;
 // ── Watcher module ───────────────────────────────────────────────────────────
 
 pub struct Watcher {
-    pool: PgPool,
+    watcher_repo: Arc<dyn WatcherRepository>,
     config: Arc<Config>,
     http: reqwest::Client,
     /// Pauser ECDSA signing key (absent when the key file is missing/invalid).
@@ -84,7 +85,7 @@ pub struct Watcher {
 impl Watcher {
     /// Construct an `Arc<Watcher>`.  Call `spawn_background` on the returned
     /// value to start the verification loops.
-    pub fn new(pool: PgPool, config: Arc<Config>, http: reqwest::Client) -> Arc<Self> {
+    pub fn new(watcher_repo: Arc<dyn WatcherRepository>, config: Arc<Config>, http: reqwest::Client) -> Arc<Self> {
         let (pauser_key, pauser_address) = match &config.pauser_key_path {
             Some(path) => eth::load_signing_key(path),
             None => (None, None),
@@ -102,7 +103,7 @@ impl Watcher {
         pause_selector.copy_from_slice(&pause_hash[..4]);
 
         Arc::new(Self {
-            pool,
+            watcher_repo,
             config,
             http,
             pauser_key,
@@ -130,21 +131,11 @@ impl Watcher {
         req: Request<GetWatcherAlertsRequest>,
     ) -> Result<Response<GetWatcherAlertsResponse>, Status> {
         let limit = req.into_inner().limit.clamp(1, 100) as i64;
-        let rows = sqlx::query(
-            "SELECT id FROM treasury.watcher_alerts \
-             ORDER BY created_at DESC LIMIT $1",
-        )
-        .bind(limit)
-        .fetch_all(&self.pool)
-        .await
-        .map_err(|e| Status::internal(e.to_string()))?;
-
-        use sqlx::Row;
-        let alert_ids = rows
-            .iter()
-            .map(|r| r.try_get::<i64, _>("id").unwrap_or(0).to_string())
-            .collect();
-
+        let alert_ids = self
+            .watcher_repo
+            .get_alert_ids(limit)
+            .await
+            .map_err(|e| Status::internal(e))?;
         Ok(Response::new(GetWatcherAlertsResponse { alert_ids }))
     }
 
@@ -282,7 +273,7 @@ impl Watcher {
         let transfer_id_hex = format!("{}", release.transfer_id);
 
         // Idempotency: skip releases we've already recorded.
-        if self.already_verified(&transfer_id_hex).await {
+        if self.watcher_repo.already_verified(&transfer_id_hex).await {
             return;
         }
 
@@ -295,21 +286,21 @@ impl Watcher {
                     let amount_ok = initiated.amount == release.amount;
                     let recipient_ok = initiated.recipient == release.recipient;
                     if amount_ok && recipient_ok {
-                        ("Verified", Some(initiated))
+                        (AlertType::Verified, Some(initiated))
                     } else {
-                        ("Mismatch", Some(initiated))
+                        (AlertType::Mismatch, Some(initiated))
                     }
                 }
-                None => ("SourceNotFound", None),
+                None => (AlertType::SourceNotFound, None),
             }
         };
 
         // For anomalies: pause the contract *before* persisting the alert so
         // the pause tx hash is captured in the detail JSON.
-        let pause_tx = if alert_type != "Verified" {
+        let pause_tx = if alert_type != AlertType::Verified {
             warn!(
                 transfer_id = %transfer_id_hex,
-                alert_type,
+                alert_type = %alert_type,
                 dest_chain = release.dest_chain_id,
                 dest_tx    = %release.dest_tx_hash,
                 "watcher: anomaly detected — triggering pause"
@@ -358,7 +349,7 @@ impl Watcher {
             }
         };
 
-        self.insert_alert(&transfer_id_hex, alert_type, &detail)
+        self.watcher_repo.insert_alert(&transfer_id_hex, alert_type, &detail)
             .await;
     }
 
@@ -468,38 +459,6 @@ impl Watcher {
             }
         }
         eth::fetch_nonce(&self.http, rpc_url, addr).await
-    }
-
-    // ── Database helpers ──────────────────────────────────────────────────────
-
-    /// Returns true if a watcher alert already exists for this transferId.
-    async fn already_verified(&self, transfer_id_hex: &str) -> bool {
-        sqlx::query("SELECT 1 FROM treasury.watcher_alerts WHERE source_event_hash = $1")
-            .bind(transfer_id_hex)
-            .fetch_optional(&self.pool)
-            .await
-            .map(|r| r.is_some())
-            .unwrap_or(false)
-    }
-
-    /// Persist a verification result.  The unique index on `source_event_hash`
-    /// makes the insert idempotent via ON CONFLICT DO NOTHING.
-    async fn insert_alert(&self, transfer_id_hex: &str, alert_type: &str, detail: &str) {
-        if let Err(e) = sqlx::query(
-            r#"
-            INSERT INTO treasury.watcher_alerts (source_event_hash, alert_type, detail)
-            VALUES ($1, $2, $3)
-            ON CONFLICT (source_event_hash) DO NOTHING
-            "#,
-        )
-        .bind(transfer_id_hex)
-        .bind(alert_type)
-        .bind(detail)
-        .execute(&self.pool)
-        .await
-        {
-            error!(err = %e, "watcher: failed to insert alert");
-        }
     }
 
     // ── Event parsing ─────────────────────────────────────────────────────────

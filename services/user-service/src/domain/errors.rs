@@ -21,6 +21,6 @@ pub enum DomainError {
     #[error("invalid tempo address: must be 0x-prefixed 40-char hex")]
     InvalidTempoAddress,
 
-    #[error("{0}")]
+    #[error("infrastructure: {0}")]
     Infrastructure(String),
 }

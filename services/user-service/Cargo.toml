@@ -24,3 +24,10 @@ tonic-build = "0.11"
 [dev-dependencies]
 sqlx         = { version = "0.7", features = ["runtime-tokio-native-tls", "postgres", "uuid", "chrono", "macros"] }
 tokio-stream = { version = "0.1", features = ["net"] }
+
+[lints.clippy]
+redundant_clone     = "warn"
+large_enum_variant  = "warn"
+needless_collect    = "warn"
+cloned_instead_of_copied = "warn"
+manual_let_else     = "warn"

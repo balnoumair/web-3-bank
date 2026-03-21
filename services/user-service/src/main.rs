@@ -3,6 +3,8 @@ mod db;
 pub mod domain;
 mod grpc;
 
+use std::sync::Arc;
+
 use grpc::user_service::UserServiceImpl;
 use grpc::UserServiceServer;
 use tonic::transport::Server;
@@ -42,10 +44,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .set_service_status("user.UserService", ServingStatus::Serving)
         .await;
 
+    let user_repo = Arc::new(db::PgUserRepository::new(pool.clone()));
+    let credential_repo = Arc::new(db::PgCredentialRepository::new(pool));
+
     tracing::info!(addr = %addr, "Starting gRPC server");
     Server::builder()
         .add_service(health_service)
-        .add_service(UserServiceServer::new(UserServiceImpl { pool }))
+        .add_service(UserServiceServer::new(UserServiceImpl {
+            user_repo,
+            credential_repo,
+        }))
         .serve(addr)
         .await?;
 
