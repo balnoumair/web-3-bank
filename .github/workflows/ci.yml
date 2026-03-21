@@ -9,9 +9,44 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # ── Detect which paths changed ───────────────────────────────────
+  changes:
+    name: Detect changed paths
+    runs-on: ubuntu-latest
+    outputs:
+      ts: ${{ steps.filter.outputs.ts }}
+      foundry: ${{ steps.filter.outputs.foundry }}
+      treasury: ${{ steps.filter.outputs.treasury }}
+      user-service: ${{ steps.filter.outputs.user-service }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            ts:
+              - 'apps/**'
+              - 'packages/**'
+              - 'services/bff/**'
+              - 'package.json'
+              - 'pnpm-lock.yaml'
+              - 'turbo.json'
+              - 'tsconfig.base.json'
+            foundry:
+              - 'packages/cre-contracts/**'
+            treasury:
+              - 'services/treasury/**'
+            user-service:
+              - 'services/user-service/**'
+              - 'services/Cargo.toml'
+              - 'services/Cargo.lock'
+
   # ── TypeScript / Turbo monorepo ──────────────────────────────────
   ts:
     name: TypeScript (lint, types, test)
+    needs: changes
+    if: needs.changes.outputs.ts == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -34,6 +69,8 @@ jobs:
   # ── Solidity / Foundry ───────────────────────────────────────────
   foundry:
     name: Foundry tests
+    needs: changes
+    if: needs.changes.outputs.foundry == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -48,16 +85,15 @@ jobs:
       - run: forge build
       - run: forge test -vvv
 
-  # ── Rust services ────────────────────────────────────────────────
-  rust:
-    name: Rust (${{ matrix.service }})
+  # ── Rust: treasury ───────────────────────────────────────────────
+  rust-treasury:
+    name: Rust (treasury)
+    needs: changes
+    if: needs.changes.outputs.treasury == 'true'
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        service: [treasury, user-service]
     defaults:
       run:
-        working-directory: services/${{ matrix.service }}
+        working-directory: services/treasury
     steps:
       - uses: actions/checkout@v4
 
@@ -70,8 +106,53 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: services/${{ matrix.service }}
+          workspaces: services/treasury
 
       - run: cargo fmt --check
-      - run: cargo clippy
+      - run: cargo clippy -- -D warnings
       - run: cargo test
+
+  # ── Rust: user-service ───────────────────────────────────────────
+  rust-user-service:
+    name: Rust (user-service)
+    needs: changes
+    if: needs.changes.outputs.user-service == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/user-service
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install protoc
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      # Workspace root is services/, not services/user-service
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: services
+
+      - run: cargo fmt --check
+      - run: cargo clippy -- -D warnings
+      - run: cargo test
+
+  # ── Sentinel: required by branch protection ──────────────────────
+  all-checks-pass:
+    name: All checks passed
+    needs: [ts, foundry, rust-treasury, rust-user-service]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify all jobs succeeded or were skipped
+        run: |
+          results="${{ join(needs.*.result, ' ') }}"
+          for result in $results; do
+            if [[ "$result" != "success" && "$result" != "skipped" ]]; then
+              echo "Job failed with result: $result"
+              exit 1
+            fi
+          done
