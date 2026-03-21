@@ -3279,6 +3279,7 @@ name = "treasury"
 version = "0.1.0"
 dependencies = [
  "alloy-primitives",
+ "async-trait",
  "envy",
  "k256",
  "prost",

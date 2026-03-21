@@ -1,5 +1,6 @@
 mod cold_path;
 mod config;
+pub mod domain;
 mod error;
 mod eth;
 mod hot_path;

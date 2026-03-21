@@ -4,21 +4,13 @@ use tonic::{Request, Response, Status};
 use uuid::Uuid;
 
 use crate::db::{credentials, users};
+use crate::domain::validation::valid_tempo_address;
 use crate::grpc::{
     user_service_server::UserService, AddCredentialRequest, AddCredentialResponse,
     CreateUserRequest, CreateUserResponse, Credential, GetUserByAddressRequest,
     GetUserByAddressResponse, ListCredentialsRequest, ListCredentialsResponse,
     RevokeCredentialRequest, RevokeCredentialResponse, UpdateUserRequest, UpdateUserResponse,
 };
-
-/// Regex for a 0x-prefixed 40-character hex Ethereum address.
-static TEMPO_ADDR_RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
-
-fn valid_tempo_address(addr: &str) -> bool {
-    TEMPO_ADDR_RE
-        .get_or_init(|| regex::Regex::new(r"^0x[0-9a-fA-F]{40}$").unwrap())
-        .is_match(addr)
-}
 
 fn pg_is_unique_violation(e: &sqlx::Error) -> bool {
     e.as_database_error()

@@ -31,6 +31,8 @@ use tonic::{Request, Response, Status};
 use tracing::{error, info, warn};
 
 use crate::config::Config;
+use crate::domain::abi::encode_release_hot_path;
+use crate::domain::events::HotPathEvent;
 use crate::error::TxError;
 use crate::eth;
 use crate::proto::treasury::{GetRelayStatusRequest, GetRelayStatusResponse};
@@ -43,21 +45,6 @@ const MAX_TX_WAIT: Duration = Duration::from_secs(60);
 const MAX_RELAY_RETRIES: u32 = 3;
 /// Maximum block range per `eth_getLogs` call (some RPCs cap this).
 const MAX_BLOCK_RANGE: u64 = 2_000;
-
-// ── Parsed event ─────────────────────────────────────────────────────────────
-
-#[derive(Debug, Clone)]
-struct HotPathEvent {
-    source_chain_id: u64,
-    /// Transaction hash of the log — used as idempotency key in relay_logs.
-    source_event_hash: String,
-    #[allow(dead_code)] // logged via Debug; available for future watcher cross-reference
-    sender: String,
-    recipient: Address,
-    amount: U256,
-    dest_chain_id: u64,
-    event_id: B256,
-}
 
 // ── Hot path module ──────────────────────────────────────────────────────────
 
@@ -593,20 +580,3 @@ impl HotPath {
     }
 }
 
-// ── Standalone helpers ────────────────────────────────────────────────────────
-
-/// ABI-encode `releaseHotPath(address,uint256,bytes32)` call data.
-fn encode_release_hot_path(
-    selector: &[u8; 4],
-    recipient: &Address,
-    amount: &U256,
-    event_id: &B256,
-) -> Vec<u8> {
-    let mut data = Vec::with_capacity(100);
-    data.extend_from_slice(selector);
-    data.extend_from_slice(&[0u8; 12]); // address left-padding
-    data.extend_from_slice(recipient.as_slice());
-    data.extend_from_slice(&amount.to_be_bytes::<32>());
-    data.extend_from_slice(event_id.as_slice());
-    data
-}

@@ -34,6 +34,8 @@ use tokio::sync::{Mutex, RwLock};
 use tracing::{error, info, warn};
 
 use crate::config::Config;
+use crate::domain::abi::{encode_rebalance, extract_ccip_message_id};
+use crate::domain::rebalance::compute_rebalance_ops;
 use crate::error::TxError;
 use crate::eth;
 
@@ -595,161 +597,12 @@ impl ColdPath {
     }
 }
 
-// ── Rebalancing algorithm ─────────────────────────────────────────────────────
-
-/// Greedily match surplus chains to deficit chains, emitting
-/// `(source_chain_id, dest_chain_id, amount)` triples.
-///
-/// Both inputs are sorted by amount descending so the largest imbalances are
-/// resolved first.  Each triple is capped at `max_per_op` when set.
-fn compute_rebalance_ops(
-    surpluses: &[(u64, U256)],
-    deficits: &[(u64, U256)],
-    max_per_op: Option<U256>,
-) -> Vec<(u64, u64, U256)> {
-    let mut ops = Vec::new();
-
-    // Sort descending so we drain the biggest imbalances first.
-    let mut sur: Vec<(u64, U256)> = surpluses.to_vec();
-    let mut def: Vec<(u64, U256)> = deficits.to_vec();
-    sur.sort_by(|a, b| b.1.cmp(&a.1));
-    def.sort_by(|a, b| b.1.cmp(&a.1));
-
-    // Mutable remaining amounts.
-    let mut sur_rem: Vec<U256> = sur.iter().map(|(_, a)| *a).collect();
-    let mut def_rem: Vec<U256> = def.iter().map(|(_, a)| *a).collect();
-
-    let mut si = 0;
-    let mut di = 0;
-
-    while si < sur.len() && di < def.len() {
-        if sur_rem[si].is_zero() {
-            si += 1;
-            continue;
-        }
-        if def_rem[di].is_zero() {
-            di += 1;
-            continue;
-        }
-
-        let mut amount = sur_rem[si].min(def_rem[di]);
-        if let Some(cap) = max_per_op {
-            amount = amount.min(cap);
-        }
-
-        if !amount.is_zero() {
-            ops.push((sur[si].0, def[di].0, amount));
-        }
-
-        sur_rem[si] = sur_rem[si].saturating_sub(amount);
-        def_rem[di] = def_rem[di].saturating_sub(amount);
-
-        // If the cap split the allocation, advance neither pointer — next
-        // iteration will emit another op for the same pair.
-        if sur_rem[si].is_zero() {
-            si += 1;
-        }
-        if def_rem[di].is_zero() {
-            di += 1;
-        }
-    }
-
-    ops
-}
-
-// ── CCIP message ID extraction ────────────────────────────────────────────────
-
-/// Best-effort extraction of a CCIP `messageId` (bytes32) from the receipt
-/// logs.  CCIP's `CCIPSendRequested` event has the messageId as the second
-/// topic.  We look for the first log that has exactly 2 topics where the
-/// second is a valid 32-byte hex value.
-fn extract_ccip_message_id(logs: &[serde_json::Value]) -> Option<String> {
-    for log in logs {
-        if let Some(topics) = log["topics"].as_array() {
-            if topics.len() >= 2 {
-                if let Some(topic1) = topics[1].as_str() {
-                    // topics[1] is 32-byte hex (0x-prefixed, 66 chars).
-                    if topic1.len() == 66 {
-                        return Some(topic1.to_string());
-                    }
-                }
-            }
-        }
-    }
-    None
-}
-
-// ── Module-specific ABI encoding ──────────────────────────────────────────────
-
-/// ABI-encode `rebalance(uint64 destChainId, uint256 amount)` call data.
-///
-/// ABI head layout:
-///   4 bytes  selector
-///  32 bytes  destChainId  (uint64, right-aligned)
-///  32 bytes  amount       (uint256, big-endian)
-fn encode_rebalance(selector: &[u8; 4], dest_chain_id: u64, amount: &U256) -> Vec<u8> {
-    let mut data = Vec::with_capacity(68);
-    data.extend_from_slice(selector);
-    // uint64 → 32-byte slot (zero-padded, right-aligned)
-    data.extend_from_slice(&[0u8; 24]);
-    data.extend_from_slice(&dest_chain_id.to_be_bytes());
-    // uint256 → 32-byte slot (big-endian)
-    data.extend_from_slice(&amount.to_be_bytes::<32>());
-    data
-}
-
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn rebalance_ops_basic() {
-        // 3 chains, total = 1000:
-        //   chain A = 600 (surplus 100 vs equal target 333)
-        //   chain B = 300 (deficit 33)
-        //   chain C = 100 (deficit 233)
-        let surpluses = vec![(1u64, U256::from(267u64))];
-        let deficits = vec![(3u64, U256::from(233u64)), (2u64, U256::from(34u64))];
-
-        let ops = compute_rebalance_ops(&surpluses, &deficits, None);
-        // Surplus is 267; fills 233 to chain 3, then 34 to chain 2.
-        assert_eq!(ops.len(), 2);
-        let total_moved: U256 = ops
-            .iter()
-            .map(|(_, _, a)| *a)
-            .fold(U256::ZERO, |acc, a| acc + a);
-        assert_eq!(total_moved, U256::from(267u64));
-    }
-
-    #[test]
-    fn rebalance_ops_capped() {
-        // Surplus of 500, deficit of 500, cap of 200 → 3 ops (200+200+100).
-        let surpluses = vec![(1u64, U256::from(500u64))];
-        let deficits = vec![(2u64, U256::from(500u64))];
-        let cap = Some(U256::from(200u64));
-
-        let ops = compute_rebalance_ops(&surpluses, &deficits, cap);
-        assert_eq!(ops.len(), 3);
-        let total_moved: U256 = ops
-            .iter()
-            .map(|(_, _, a)| *a)
-            .fold(U256::ZERO, |acc, a| acc + a);
-        assert_eq!(total_moved, U256::from(500u64));
-        // Each individual op must be ≤ 200.
-        for (_, _, amount) in &ops {
-            assert!(*amount <= U256::from(200u64));
-        }
-    }
-
-    #[test]
-    fn rebalance_ops_no_deficit() {
-        let surpluses = vec![(1u64, U256::from(100u64))];
-        let deficits: Vec<(u64, U256)> = vec![];
-        let ops = compute_rebalance_ops(&surpluses, &deficits, None);
-        assert!(ops.is_empty());
-    }
+    use crate::domain::abi::encode_rebalance;
 
     #[test]
     fn encode_rebalance_calldata() {
