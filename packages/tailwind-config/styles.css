@@ -5,6 +5,7 @@
     --font-serif: ui-serif, Georgia, Cambria, "Times New Roman", Times, serif;
     --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
     --font-Inter: ui-Inter, system-ui, Inter, sans-serif;
+    --font-display: 'Satoshi', ui-sans-serif, system-ui, sans-serif;
 
     --color-white: #fff;
     --color-black: #000;

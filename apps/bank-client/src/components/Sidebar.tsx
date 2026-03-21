@@ -1,149 +1,98 @@
 import { Component } from 'solid-js';
+import { useLocation } from '@solidjs/router';
 
 const Sidebar: Component = () => {
-    const sidebarStyle = {
-        position: 'fixed',
-        left: '0',
-        top: '0',
-        height: '100vh',
-        width: '13rem',
-        'background-color': '#151515',
-        'border-right': '1px solid rgba(255, 255, 255, 0.05)',
-        display: 'flex',
-        'flex-direction': 'column',
-    };
+  const location = useLocation();
+  const isActive = (path: string) => location.pathname === path;
 
-    const logoContainerStyle = {
-        padding: '1.5rem',
-        'border-bottom': '1px solid rgba(255, 255, 255, 0.05)',
-    };
-
-    const logoStyle = {
-        display: 'flex',
-        'align-items': 'center',
-        gap: '0.75rem',
-    };
-
-    const iconStyle = {
-        width: '2rem',
-        height: '2rem',
-        'background-color': 'white',
-        'border-radius': '0.375rem',
-        display: 'flex',
-        'align-items': 'center',
-        'justify-content': 'center',
-        color: 'black',
-        'font-size': '1.25rem',
-        'font-weight': 'bold',
-    };
-
-    const navStyle = {
-        flex: '1',
-        padding: '1rem',
-        display: 'flex',
-        'flex-direction': 'column',
-        gap: '0.25rem',
-    };
-
-    const navItemActiveStyle = {
-        display: 'flex',
-        'align-items': 'center',
-        gap: '0.75rem',
-        padding: '0.75rem 1rem',
-        'border-radius': '0.5rem',
-        background: 'linear-gradient(to right, #2d5f4d, #3a7360)',
-        color: 'white',
-        'text-decoration': 'none',
-        'font-size': '0.875rem',
-        'font-weight': '500',
-    };
-
-    const navItemStyle = {
-        display: 'flex',
-        'align-items': 'center',
-        gap: '0.75rem',
-        padding: '0.75rem 1rem',
-        'border-radius': '0.5rem',
-        color: '#9ca3af',
-        'text-decoration': 'none',
-        'font-size': '0.875rem',
-        'font-weight': '500',
-        transition: 'all 0.2s',
-    };
-
-    const bottomStyle = {
-        padding: '1rem',
-        'border-top': '1px solid rgba(255, 255, 255, 0.05)',
-    };
-
-    const buttonStyle = {
-        width: '100%',
-        padding: '0.625rem 1rem',
-        background: 'linear-gradient(to right, #2d5f4d, #3a7360)',
-        color: 'white',
-        'border-radius': '0.5rem',
-        'font-size': '0.875rem',
-        'font-weight': '500',
-        border: 'none',
-        cursor: 'pointer',
-    };
-
-    return (
-        <div style={sidebarStyle}>
-            {/* Logo */}
-            <div style={logoContainerStyle}>
-                <div style={logoStyle}>
-                    <div style={iconStyle}>$</div>
-                    <span style={{ color: 'white', 'font-weight': '600' }}>StableBank</span>
-                </div>
-            </div>
-
-            {/* Navigation */}
-            <nav style={navStyle}>
-                <a href="/" style={navItemActiveStyle}>
-                    <span style={{ 'font-size': '1.125rem' }}>📊</span>
-                    <span>Dashboard</span>
-                </a>
-
-                <a href="#" style={navItemStyle}>
-                    <span style={{ 'font-size': '1.125rem' }}>💳</span>
-                    <span>Wallet</span>
-                </a>
-
-                <a href="#" style={navItemStyle}>
-                    <span style={{ 'font-size': '1.125rem' }}>📋</span>
-                    <span>Activity</span>
-                </a>
-
-                <a href="#" style={navItemStyle}>
-                    <span style={{ 'font-size': '1.125rem' }}>📈</span>
-                    <span>Yield</span>
-                </a>
-
-                <a href="#" style={navItemStyle}>
-                    <span style={{ 'font-size': '1.125rem' }}>⚙️</span>
-                    <span>Settings</span>
-                </a>
-            </nav>
-
-            {/* Bottom Section */}
-            <div style={bottomStyle}>
-                <div style={{ 'margin-bottom': '0.75rem' }}>
-                    <div style={{ 'font-size': '0.75rem', color: '#6b7280', 'text-transform': 'uppercase', 'margin-bottom': '0.25rem' }}>
-                        Account Tier
-                    </div>
-                    <div style={{ display: 'flex', 'align-items': 'center', gap: '0.5rem' }}>
-                        <div style={{ width: '0.5rem', height: '0.5rem', 'border-radius': '50%', 'background-color': '#10b981' }}></div>
-                        <span style={{ 'font-size': '0.875rem', color: 'white', 'font-weight': '500' }}>Premium Pro</span>
-                    </div>
-                </div>
-
-                <button style={buttonStyle}>
-                    Connect Wallet
-                </button>
-            </div>
+  return (
+    <div class="fixed left-0 top-0 h-screen w-52 bg-[#161616] border-r border-warm/5 flex flex-col">
+      {/* Logo */}
+      <div class="p-5 border-b border-warm/5">
+        <div class="flex items-center gap-3">
+          <div class="w-8 h-8 bg-hue rounded-lg flex items-center justify-center text-white font-bold text-sm">
+            W3
+          </div>
+          <span class="text-white font-bold text-lg font-[Satoshi] tracking-tight">
+            Web3Bank
+          </span>
         </div>
-    );
+      </div>
+
+      {/* Navigation */}
+      <nav class="flex-1 p-3 flex flex-col gap-1">
+        <a
+          href="/"
+          class={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all ${
+            isActive('/')
+              ? 'bg-lichen/20 text-lush'
+              : 'text-warm/60 hover:text-warm hover:bg-warm/5'
+          }`}
+        >
+          <svg class="w-[18px] h-[18px]" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" />
+          </svg>
+          Dashboard
+        </a>
+
+        <a
+          href="#"
+          class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-warm/60 hover:text-warm hover:bg-warm/5 transition-all"
+        >
+          <svg class="w-[18px] h-[18px]" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
+          </svg>
+          Wallet
+        </a>
+
+        <a
+          href="#"
+          class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-warm/60 hover:text-warm hover:bg-warm/5 transition-all"
+        >
+          <svg class="w-[18px] h-[18px]" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+          Activity
+        </a>
+
+        <a
+          href="#"
+          class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-warm/60 hover:text-warm hover:bg-warm/5 transition-all"
+        >
+          <svg class="w-[18px] h-[18px]" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
+          </svg>
+          Yield
+        </a>
+
+        <div class="my-3 border-t border-warm/5" />
+
+        <a
+          href="#"
+          class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-warm/60 hover:text-warm hover:bg-warm/5 transition-all"
+        >
+          <svg class="w-[18px] h-[18px]" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+            <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+          </svg>
+          Settings
+        </a>
+      </nav>
+
+      {/* Bottom */}
+      <div class="p-4 border-t border-warm/5">
+        <div class="mb-3">
+          <div class="text-[10px] font-medium text-warm/40 uppercase tracking-wider mb-1">
+            Account Tier
+          </div>
+          <div class="flex items-center gap-2">
+            <div class="w-1.5 h-1.5 rounded-full bg-success" />
+            <span class="text-sm text-white font-medium">Premium</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
 };
 
 export default Sidebar;
