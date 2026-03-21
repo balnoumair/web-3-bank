@@ -1,9 +1,11 @@
+use std::sync::Arc;
+
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
-use sqlx::PgPool;
 use tonic::{Request, Response, Status};
 use uuid::Uuid;
 
-use crate::db::{credentials, users};
+use crate::domain::errors::DomainError;
+use crate::domain::repository::{CredentialRepository, UserRepository};
 use crate::domain::validation::valid_tempo_address;
 use crate::grpc::{
     user_service_server::UserService, AddCredentialRequest, AddCredentialResponse,
@@ -12,15 +14,28 @@ use crate::grpc::{
     RevokeCredentialRequest, RevokeCredentialResponse, UpdateUserRequest, UpdateUserResponse,
 };
 
-fn pg_is_unique_violation(e: &sqlx::Error) -> bool {
-    e.as_database_error()
-        .and_then(|d| d.code())
-        .map(|c| c == "23505")
-        .unwrap_or(false)
+fn domain_err_to_status(e: DomainError) -> Status {
+    match e {
+        DomainError::LastActiveCredential => {
+            Status::failed_precondition("cannot revoke the last active credential")
+        }
+        DomainError::CredentialNotFound => {
+            Status::not_found("credential not found or already revoked")
+        }
+        DomainError::UserNotFound => Status::not_found("user not found"),
+        DomainError::AlreadyExists => {
+            Status::already_exists("address or credential already registered")
+        }
+        DomainError::InvalidTempoAddress => Status::invalid_argument(
+            "tempo_address must be a 0x-prefixed 40-char hex string",
+        ),
+        DomainError::Infrastructure(msg) => Status::internal(msg),
+    }
 }
 
 pub struct UserServiceImpl {
-    pub pool: PgPool,
+    pub user_repo: Arc<dyn UserRepository>,
+    pub credential_repo: Arc<dyn CredentialRepository>,
 }
 
 #[tonic::async_trait]
@@ -37,49 +52,21 @@ impl UserService for UserServiceImpl {
             ));
         }
 
-        let mut tx = self
-            .pool
-            .begin()
+        let user_id = self
+            .user_repo
+            .insert(req.display_name.as_deref())
             .await
-            .map_err(|e| Status::internal(e.to_string()))?;
+            .map_err(domain_err_to_status)?;
 
-        let name = req.display_name.as_deref().unwrap_or("");
-        let user_row = sqlx::query!(
-            "INSERT INTO users.users (display_name) VALUES ($1) RETURNING id",
-            name
-        )
-        .fetch_one(&mut *tx)
-        .await
-        .map_err(|e| Status::internal(e.to_string()))?;
-
-        let user_id = user_row.id;
-
-        let cred_result = sqlx::query!(
-            "INSERT INTO users.credentials (user_id, credential_id, public_key, tempo_address) VALUES ($1, $2, $3, $4) RETURNING id",
-            user_id,
-            req.credential_id.as_slice(),
-            req.public_key.as_slice(),
-            req.tempo_address,
-        )
-        .fetch_one(&mut *tx)
-        .await;
-
-        match cred_result {
-            Ok(_) => {}
-            Err(e) => {
-                drop(tx); // auto-rollback
-                if pg_is_unique_violation(&e) {
-                    return Err(Status::already_exists(
-                        "address or credential already registered",
-                    ));
-                }
-                return Err(Status::internal(e.to_string()));
-            }
-        }
-
-        tx.commit()
+        self.credential_repo
+            .insert(
+                user_id,
+                &req.credential_id,
+                &req.public_key,
+                &req.tempo_address,
+            )
             .await
-            .map_err(|e| Status::internal(e.to_string()))?;
+            .map_err(domain_err_to_status)?;
 
         Ok(Response::new(CreateUserResponse {
             user_id: user_id.to_string(),
@@ -92,15 +79,17 @@ impl UserService for UserServiceImpl {
     ) -> Result<Response<GetUserByAddressResponse>, Status> {
         let req = request.into_inner();
 
-        let row = credentials::get_user_by_address(&self.pool, &req.tempo_address)
+        let row = self
+            .credential_repo
+            .get_user_by_address(&req.tempo_address)
             .await
-            .map_err(|e| Status::internal(e.to_string()))?
+            .map_err(domain_err_to_status)?
             .ok_or_else(|| Status::not_found("user not found for given tempo_address"))?;
 
         Ok(Response::new(GetUserByAddressResponse {
             user_id: row.user_id.to_string(),
             display_name: row.display_name,
-            status: row.status,
+            status: row.status.to_string(),
             tempo_address: row.tempo_address,
         }))
     }
@@ -114,17 +103,17 @@ impl UserService for UserServiceImpl {
         let user_id = Uuid::parse_str(&req.user_id)
             .map_err(|_| Status::invalid_argument("user_id must be a valid UUID"))?;
 
-        let rows = credentials::list_credentials(&self.pool, user_id, false)
+        let creds = self
+            .credential_repo
+            .list(user_id, false)
             .await
-            .map_err(|e| Status::internal(e.to_string()))?;
-
-        let creds = rows
+            .map_err(domain_err_to_status)?
             .into_iter()
-            .map(|r| Credential {
-                credential_id: URL_SAFE_NO_PAD.encode(&r.credential_id),
-                tempo_address: r.tempo_address,
-                created_at: r.created_at.to_rfc3339(),
-                revoked: r.revoked_at.is_some(),
+            .map(|c| Credential {
+                credential_id: URL_SAFE_NO_PAD.encode(&c.credential_id),
+                tempo_address: c.tempo_address,
+                created_at: c.created_at.to_rfc3339(),
+                revoked: c.revoked_at.is_some(),
             })
             .collect();
 
@@ -148,25 +137,21 @@ impl UserService for UserServiceImpl {
             ));
         }
 
-        users::get_user_by_id(&self.pool, user_id)
+        self.user_repo
+            .get_by_id(user_id)
             .await
-            .map_err(|e| Status::internal(e.to_string()))?
+            .map_err(domain_err_to_status)?
             .ok_or_else(|| Status::not_found("user not found"))?;
 
-        credentials::insert_credential(
-            &self.pool,
-            user_id,
-            &req.credential_id,
-            &req.public_key,
-            &req.tempo_address,
-        )
-        .await
-        .map_err(|e| match &e {
-            credentials::CredentialError::Db(db_err) if pg_is_unique_violation(db_err) => {
-                Status::already_exists("tempo_address already registered")
-            }
-            _ => Status::internal(e.to_string()),
-        })?;
+        self.credential_repo
+            .insert(
+                user_id,
+                &req.credential_id,
+                &req.public_key,
+                &req.tempo_address,
+            )
+            .await
+            .map_err(domain_err_to_status)?;
 
         let encoded_id = URL_SAFE_NO_PAD.encode(&req.credential_id);
 
@@ -184,22 +169,26 @@ impl UserService for UserServiceImpl {
         let user_id = Uuid::parse_str(&req.user_id)
             .map_err(|_| Status::invalid_argument("invalid user_id"))?;
 
-        // Check user exists first
-        let row = users::get_user_by_id(&self.pool, user_id)
+        let user = self
+            .user_repo
+            .get_by_id(user_id)
             .await
-            .map_err(|e| Status::internal(e.to_string()))?
+            .map_err(domain_err_to_status)?
             .ok_or_else(|| Status::not_found("user not found"))?;
 
-        // Only update if display_name is provided (proto3 optional)
         if let Some(name) = &req.display_name {
-            users::update_display_name(&self.pool, user_id, name)
+            self.user_repo
+                .update_display_name(user_id, name)
                 .await
-                .map_err(|e| Status::internal(e.to_string()))?;
-            // Re-fetch to get updated display_name
-            let updated = users::get_user_by_id(&self.pool, user_id)
+                .map_err(domain_err_to_status)?;
+
+            let updated = self
+                .user_repo
+                .get_by_id(user_id)
                 .await
-                .map_err(|e| Status::internal(e.to_string()))?
+                .map_err(domain_err_to_status)?
                 .ok_or_else(|| Status::not_found("user not found"))?;
+
             return Ok(Response::new(UpdateUserResponse {
                 user_id: updated.id.to_string(),
                 display_name: updated.display_name,
@@ -207,8 +196,8 @@ impl UserService for UserServiceImpl {
         }
 
         Ok(Response::new(UpdateUserResponse {
-            user_id: row.id.to_string(),
-            display_name: row.display_name,
+            user_id: user.id.to_string(),
+            display_name: user.display_name,
         }))
     }
 
@@ -221,17 +210,10 @@ impl UserService for UserServiceImpl {
         let user_id = Uuid::parse_str(&req.user_id)
             .map_err(|_| Status::invalid_argument("user_id must be a valid UUID"))?;
 
-        credentials::revoke_credential(&self.pool, user_id, &req.credential_id)
+        self.credential_repo
+            .revoke(user_id, &req.credential_id)
             .await
-            .map_err(|e| match e {
-                credentials::CredentialError::LastActiveCredential => {
-                    Status::failed_precondition("cannot revoke the last active credential")
-                }
-                credentials::CredentialError::NotFound => {
-                    Status::not_found("credential not found or already revoked")
-                }
-                credentials::CredentialError::Db(db_err) => Status::internal(db_err.to_string()),
-            })?;
+            .map_err(domain_err_to_status)?;
 
         Ok(Response::new(RevokeCredentialResponse { success: true }))
     }
@@ -240,14 +222,19 @@ impl UserService for UserServiceImpl {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::db::{PgCredentialRepository, PgUserRepository};
     use crate::grpc::{user_service_client::UserServiceClient, UserServiceServer};
+    use sqlx::PgPool;
     use tokio_stream::wrappers::TcpListenerStream;
     use tonic::transport::Server;
 
     async fn start_test_server(pool: PgPool) -> String {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
-        let svc = UserServiceServer::new(UserServiceImpl { pool });
+        let svc = UserServiceServer::new(UserServiceImpl {
+            user_repo: Arc::new(PgUserRepository::new(pool.clone())),
+            credential_repo: Arc::new(PgCredentialRepository::new(pool)),
+        });
         tokio::spawn(async move {
             Server::builder()
                 .add_service(svc)

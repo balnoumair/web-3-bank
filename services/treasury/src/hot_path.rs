@@ -25,7 +25,6 @@ use std::time::Duration;
 
 use alloy_primitives::{keccak256, Address, B256, U256};
 use k256::ecdsa::SigningKey;
-use sqlx::PgPool;
 use tokio::sync::{Mutex, RwLock};
 use tonic::{Request, Response, Status};
 use tracing::{error, info, warn};
@@ -33,6 +32,8 @@ use tracing::{error, info, warn};
 use crate::config::Config;
 use crate::domain::abi::encode_release_hot_path;
 use crate::domain::events::HotPathEvent;
+use crate::domain::repository::RelayRepository;
+use crate::domain::status::RelayStatus;
 use crate::error::TxError;
 use crate::eth;
 use crate::proto::treasury::{GetRelayStatusRequest, GetRelayStatusResponse};
@@ -49,7 +50,7 @@ const MAX_BLOCK_RANGE: u64 = 2_000;
 // ── Hot path module ──────────────────────────────────────────────────────────
 
 pub struct HotPath {
-    pool: PgPool,
+    relay_repo: Arc<dyn RelayRepository>,
     config: Arc<Config>,
     http: reqwest::Client,
     /// Chain IDs currently in the active set per the latest ActivationPublished
@@ -75,7 +76,7 @@ pub struct HotPath {
 impl HotPath {
     /// Construct an `Arc<HotPath>`. Call `spawn_background` on the returned
     /// value to start the event-listener and route-receiver loops.
-    pub fn new(pool: PgPool, config: Arc<Config>, http: reqwest::Client) -> Arc<Self> {
+    pub fn new(relay_repo: Arc<dyn RelayRepository>, config: Arc<Config>, http: reqwest::Client) -> Arc<Self> {
         let (relayer_key, relayer_address) = eth::load_signing_key(&config.relayer_key_path);
 
         // Seed active chains with every chain that has an RPC URL so the relay
@@ -95,7 +96,7 @@ impl HotPath {
         pool_depth_selector.copy_from_slice(&pool_depth_hash[..4]);
 
         Arc::new(Self {
-            pool,
+            relay_repo,
             config,
             http,
             active_chains: Arc::new(RwLock::new(initial)),
@@ -124,19 +125,8 @@ impl HotPath {
         req: Request<GetRelayStatusRequest>,
     ) -> Result<Response<GetRelayStatusResponse>, Status> {
         let hash = req.into_inner().source_event_hash;
-        let row =
-            sqlx::query("SELECT status FROM treasury.relay_logs WHERE source_event_hash = $1")
-                .bind(&hash)
-                .fetch_optional(&self.pool)
-                .await
-                .map_err(|e| Status::internal(e.to_string()))?;
-
-        match row {
-            Some(r) => {
-                use sqlx::Row;
-                let status: String = r.try_get("status").unwrap_or_default();
-                Ok(Response::new(GetRelayStatusResponse { status }))
-            }
+        match self.relay_repo.get_relay_status(&hash).await {
+            Some(status) => Ok(Response::new(GetRelayStatusResponse { status })),
             None => Err(Status::not_found("no relay log found for that event hash")),
         }
     }
@@ -263,7 +253,7 @@ impl HotPath {
 
     async fn relay_event(&self, event: HotPathEvent) {
         // 1. Idempotency guard.
-        if self.relay_already_recorded(&event.source_event_hash).await {
+        if self.relay_repo.relay_already_recorded(&event.source_event_hash).await {
             return;
         }
 
@@ -279,7 +269,7 @@ impl HotPath {
                 dest_chain = event.dest_chain_id,
                 "hot_path: rejected — destination chain not active"
             );
-            self.insert_relay_log(&event, None, "rejected_inactive_chain")
+            self.relay_repo.insert_relay_log(&event, None, RelayStatus::RejectedInactiveChain)
                 .await;
             return;
         }
@@ -318,7 +308,7 @@ impl HotPath {
                     %depth,
                     "hot_path: rejected — insufficient pool depth"
                 );
-                self.insert_relay_log(&event, None, "rejected_insufficient_depth")
+                self.relay_repo.insert_relay_log(&event, None, RelayStatus::RejectedInsufficientDepth)
                     .await;
                 return;
             }
@@ -332,7 +322,7 @@ impl HotPath {
         }
 
         // 4. Record pending.
-        self.insert_relay_log(&event, None, "pending").await;
+        self.relay_repo.insert_relay_log(&event, None, RelayStatus::Pending).await;
 
         // 5. Submit with retry.
         match self
@@ -345,7 +335,7 @@ impl HotPath {
                     dest_tx = tx_hash,
                     "hot_path: relay completed"
                 );
-                self.update_relay_log(&event.source_event_hash, &tx_hash, "completed")
+                self.relay_repo.update_relay_log(&event.source_event_hash, &tx_hash, RelayStatus::Completed)
                     .await;
             }
             Err(e) => {
@@ -354,7 +344,7 @@ impl HotPath {
                     err = %e,
                     "hot_path: relay failed after retries"
                 );
-                self.update_relay_log_failed(&event.source_event_hash).await;
+                self.relay_repo.update_relay_log_failed(&event.source_event_hash).await;
             }
         }
     }
@@ -460,78 +450,6 @@ impl HotPath {
             }
         }
         eth::fetch_nonce(&self.http, rpc_url, addr).await
-    }
-
-    // ── Database helpers ──────────────────────────────────────────────────────
-
-    async fn relay_already_recorded(&self, source_event_hash: &str) -> bool {
-        sqlx::query("SELECT 1 FROM treasury.relay_logs WHERE source_event_hash = $1")
-            .bind(source_event_hash)
-            .fetch_optional(&self.pool)
-            .await
-            .map(|r| r.is_some())
-            .unwrap_or(false)
-    }
-
-    async fn insert_relay_log(
-        &self,
-        event: &HotPathEvent,
-        dest_tx_hash: Option<&str>,
-        status: &str,
-    ) {
-        let amount_str = event.amount.to_string();
-        let recipient_str = format!("0x{}", eth::bytes_to_hex(event.recipient.as_slice()));
-        if let Err(e) = sqlx::query(
-            r#"
-            INSERT INTO treasury.relay_logs
-                (source_event_hash, dest_tx_hash, source_chain_id, dest_chain_id,
-                 recipient, amount_wei, status)
-            VALUES ($1, $2, $3, $4, $5, $6::NUMERIC, $7)
-            ON CONFLICT (source_event_hash) DO NOTHING
-            "#,
-        )
-        .bind(&event.source_event_hash)
-        .bind(dest_tx_hash)
-        .bind(event.source_chain_id as i64)
-        .bind(event.dest_chain_id as i64)
-        .bind(&recipient_str)
-        .bind(&amount_str)
-        .bind(status)
-        .execute(&self.pool)
-        .await
-        {
-            error!(err = %e, "hot_path: failed to insert relay log");
-        }
-    }
-
-    async fn update_relay_log(&self, source_event_hash: &str, dest_tx_hash: &str, status: &str) {
-        if let Err(e) = sqlx::query(
-            "UPDATE treasury.relay_logs \
-             SET dest_tx_hash = $1, status = $2, updated_at = now() \
-             WHERE source_event_hash = $3",
-        )
-        .bind(dest_tx_hash)
-        .bind(status)
-        .bind(source_event_hash)
-        .execute(&self.pool)
-        .await
-        {
-            error!(err = %e, "hot_path: failed to update relay log");
-        }
-    }
-
-    async fn update_relay_log_failed(&self, source_event_hash: &str) {
-        if let Err(e) = sqlx::query(
-            "UPDATE treasury.relay_logs \
-             SET status = 'failed', updated_at = now() \
-             WHERE source_event_hash = $1",
-        )
-        .bind(source_event_hash)
-        .execute(&self.pool)
-        .await
-        {
-            error!(err = %e, "hot_path: failed to mark relay log as failed");
-        }
     }
 
     // ── Event parsing ─────────────────────────────────────────────────────────

@@ -29,13 +29,13 @@ use std::time::Duration;
 
 use alloy_primitives::{keccak256, Address, B256, U256};
 use k256::ecdsa::SigningKey;
-use sqlx::PgPool;
 use tokio::sync::{Mutex, RwLock};
 use tracing::{error, info, warn};
 
 use crate::config::Config;
 use crate::domain::abi::{encode_rebalance, extract_ccip_message_id};
 use crate::domain::rebalance::compute_rebalance_ops;
+use crate::domain::repository::RebalanceRepository;
 use crate::error::TxError;
 use crate::eth;
 
@@ -51,7 +51,7 @@ const REBALANCE_GAS_LIMIT: u64 = 300_000;
 // ── Cold-path module ──────────────────────────────────────────────────────────
 
 pub struct ColdPath {
-    pool: PgPool,
+    rebalance_repo: Arc<dyn RebalanceRepository>,
     config: Arc<Config>,
     http: reqwest::Client,
     /// Active chain IDs from the latest `ActivationPublished` event.
@@ -81,7 +81,7 @@ pub struct ColdPath {
 impl ColdPath {
     /// Construct a `ColdPath` and return it wrapped in an `Arc`.
     /// Call [`spawn_background`] on the result to start background tasks.
-    pub fn new(pool: PgPool, config: Arc<Config>, http: reqwest::Client) -> Arc<Self> {
+    pub fn new(rebalance_repo: Arc<dyn RebalanceRepository>, config: Arc<Config>, http: reqwest::Client) -> Arc<Self> {
         let (relayer_key, relayer_address) = eth::load_signing_key(&config.relayer_key_path);
 
         let initial: HashSet<u64> = config.rpc_urls.keys().cloned().collect();
@@ -117,7 +117,7 @@ impl ColdPath {
         let poll_interval = Duration::from_secs(config.cold_path_poll_secs);
 
         Arc::new(Self {
-            pool,
+            rebalance_repo,
             config,
             http,
             active_chains: Arc::new(RwLock::new(initial)),
@@ -358,7 +358,7 @@ impl ColdPath {
             }
 
             // Idempotency: skip if a recent op for this chain pair is still in flight.
-            if self.op_in_flight(source_chain, dest_chain).await {
+            if self.rebalance_repo.op_in_flight(source_chain, dest_chain).await {
                 info!(
                     source_chain,
                     dest_chain, "cold_path: in-flight op exists — skipping"
@@ -373,7 +373,7 @@ impl ColdPath {
                 .as_millis();
             let op_id = format!("{source_chain}-{dest_chain}-{ts_ms}");
 
-            self.insert_rebalance_op(&op_id, source_chain, dest_chain, &amount)
+            self.rebalance_repo.insert_rebalance_op(&op_id, source_chain, dest_chain, &amount)
                 .await;
 
             match self
@@ -397,12 +397,12 @@ impl ColdPath {
                         ccip_message_id = ccip_msg_id.as_deref().unwrap_or("unknown"),
                         "cold_path: rebalance submitted"
                     );
-                    self.update_rebalance_op_submitted(&op_id, &tx_hash, ccip_msg_id.as_deref())
+                    self.rebalance_repo.update_rebalance_op_submitted(&op_id, &tx_hash, ccip_msg_id.as_deref())
                         .await;
                 }
                 Err(e) => {
                     error!(op_id, err = %e, "cold_path: rebalance failed after retries");
-                    self.update_rebalance_op_failed(&op_id).await;
+                    self.rebalance_repo.update_rebalance_op_failed(&op_id).await;
                 }
             }
         }
@@ -513,88 +513,6 @@ impl ColdPath {
         eth::fetch_nonce(&self.http, rpc_url, addr).await
     }
 
-    // ── Database helpers ──────────────────────────────────────────────────────
-
-    /// Returns true if there is a pending or submitted rebalance op for this
-    /// chain pair created within the last 24 hours.
-    async fn op_in_flight(&self, source_chain: u64, dest_chain: u64) -> bool {
-        sqlx::query(
-            "SELECT 1 FROM treasury.rebalance_ops \
-             WHERE source_chain_id = $1 \
-               AND dest_chain_id   = $2 \
-               AND status IN ('pending', 'submitted') \
-               AND created_at > NOW() - INTERVAL '24 hours'",
-        )
-        .bind(source_chain as i64)
-        .bind(dest_chain as i64)
-        .fetch_optional(&self.pool)
-        .await
-        .map(|r| r.is_some())
-        .unwrap_or(false)
-    }
-
-    async fn insert_rebalance_op(
-        &self,
-        op_id: &str,
-        source_chain: u64,
-        dest_chain: u64,
-        amount: &U256,
-    ) {
-        let amount_str = amount.to_string();
-        if let Err(e) = sqlx::query(
-            r#"
-            INSERT INTO treasury.rebalance_ops
-                (op_id, source_chain_id, dest_chain_id, amount_wei, status)
-            VALUES ($1, $2, $3, $4::NUMERIC, 'pending')
-            ON CONFLICT (op_id) DO NOTHING
-            "#,
-        )
-        .bind(op_id)
-        .bind(source_chain as i64)
-        .bind(dest_chain as i64)
-        .bind(&amount_str)
-        .execute(&self.pool)
-        .await
-        {
-            error!(op_id, err = %e, "cold_path: failed to insert rebalance_op");
-        }
-    }
-
-    async fn update_rebalance_op_submitted(
-        &self,
-        op_id: &str,
-        tx_hash: &str,
-        ccip_message_id: Option<&str>,
-    ) {
-        if let Err(e) = sqlx::query(
-            "UPDATE treasury.rebalance_ops \
-             SET status = 'submitted', source_tx_hash = $1, \
-                 ccip_message_id = $2, updated_at = NOW() \
-             WHERE op_id = $3",
-        )
-        .bind(tx_hash)
-        .bind(ccip_message_id)
-        .bind(op_id)
-        .execute(&self.pool)
-        .await
-        {
-            error!(op_id, err = %e, "cold_path: failed to update rebalance_op to submitted");
-        }
-    }
-
-    async fn update_rebalance_op_failed(&self, op_id: &str) {
-        if let Err(e) = sqlx::query(
-            "UPDATE treasury.rebalance_ops \
-             SET status = 'failed', updated_at = NOW() \
-             WHERE op_id = $1",
-        )
-        .bind(op_id)
-        .execute(&self.pool)
-        .await
-        {
-            error!(op_id, err = %e, "cold_path: failed to mark rebalance_op as failed");
-        }
-    }
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────

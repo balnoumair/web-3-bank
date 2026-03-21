@@ -1,5 +1,6 @@
 mod cold_path;
 mod config;
+mod db;
 pub mod domain;
 mod error;
 mod eth;
@@ -69,11 +70,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
     }
 
-    // ── 3. Construct modules ──────────────────────────────────────────────────
-    let hot_path = HotPath::new(pool.clone(), Arc::clone(&cfg), http.clone());
-    let pool_manager = PoolManager::new(pool.clone(), Arc::clone(&cfg), http.clone());
-    let watcher = Watcher::new(pool.clone(), Arc::clone(&cfg), http.clone());
-    let cold_path = ColdPath::new(pool.clone(), Arc::clone(&cfg), http.clone());
+    // ── 3. Construct repository adapters + modules ─────────────────────────────
+    let relay_repo = Arc::new(db::PgRelayRepository::new(pool.clone()));
+    let rebalance_repo = Arc::new(db::PgRebalanceRepository::new(pool.clone()));
+    let watcher_repo = Arc::new(db::PgWatcherRepository::new(pool.clone()));
+    let snapshot_repo = Arc::new(db::PgPoolSnapshotRepository::new(pool.clone()));
+
+    let hot_path = HotPath::new(relay_repo, Arc::clone(&cfg), http.clone());
+    let pool_manager = PoolManager::new(snapshot_repo, Arc::clone(&cfg), http.clone());
+    let watcher = Watcher::new(watcher_repo, Arc::clone(&cfg), http.clone());
+    let cold_path = ColdPath::new(rebalance_repo, Arc::clone(&cfg), http.clone());
 
     // ── 4. Spawn background tasks ─────────────────────────────────────────────
     Arc::clone(&hot_path).spawn_background();

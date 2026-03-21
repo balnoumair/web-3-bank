@@ -8,6 +8,7 @@ use alloy_primitives::U256;
 use async_trait::async_trait;
 
 use crate::domain::events::HotPathEvent;
+use crate::domain::status::{AlertType, RelayStatus};
 
 // ── Relay repository (hot-path) ─────────────────────────────────────────────
 
@@ -21,7 +22,7 @@ pub trait RelayRepository: Send + Sync {
         &self,
         event: &HotPathEvent,
         dest_tx_hash: Option<&str>,
-        status: &str,
+        status: RelayStatus,
     );
 
     /// Update a relay log entry with a destination tx hash and status.
@@ -29,7 +30,7 @@ pub trait RelayRepository: Send + Sync {
         &self,
         source_event_hash: &str,
         dest_tx_hash: &str,
-        status: &str,
+        status: RelayStatus,
     );
 
     /// Mark a relay log entry as failed.
@@ -48,7 +49,7 @@ pub trait WatcherRepository: Send + Sync {
     async fn already_verified(&self, transfer_id_hex: &str) -> bool;
 
     /// Insert a verification alert.
-    async fn insert_alert(&self, transfer_id_hex: &str, alert_type: &str, detail: &str);
+    async fn insert_alert(&self, transfer_id_hex: &str, alert_type: AlertType, detail: &str);
 
     /// Get the most recent alert IDs, up to `limit`.
     async fn get_alert_ids(&self, limit: i64) -> Result<Vec<String>, String>;
