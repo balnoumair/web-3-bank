@@ -1,5 +1,7 @@
 mod cold_path;
 mod config;
+mod error;
+mod eth;
 mod hot_path;
 mod pool_manager;
 mod server;
