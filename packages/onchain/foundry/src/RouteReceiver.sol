@@ -15,10 +15,26 @@ contract RouteReceiver {
         uint256 timestamp;
     }
 
+    // ── Constants ──────────────────────────────────────────────────────
+
+    uint256 private constant MAX_SHORT_STRING = 128;
+    uint256 private constant MAX_CSV_STRING = 512;
+
+    // ── Errors ─────────────────────────────────────────────────────────
+
+    error ContractPaused();
+    error StringTooLong();
+
     // ── State ──────────────────────────────────────────────────────────
 
     /// @notice Contract owner (deployer). Can manage the publisher allowlist.
     address public owner;
+
+    /// @notice Pending owner for two-step ownership transfer.
+    address public pendingOwner;
+
+    /// @notice Emergency pause flag. Blocks all write operations when true.
+    bool public paused;
 
     /// @notice Authorized publisher addresses.
     mapping(address => bool) public publishers;
@@ -26,8 +42,11 @@ contract RouteReceiver {
     /// @notice Latest route per customer.
     mapping(string customerId => RouteRecord) private _latestRoutes;
 
-    /// @notice Replay guard — true if a runId has already been published.
-    mapping(string runId => bool) private _publishedRuns;
+    /// @notice Replay guard for publishRoute — true if a runId has already been route-published.
+    mapping(string runId => bool) private _publishedRouteRuns;
+
+    /// @notice Replay guard for publishActivationState — true if a runId has already been activation-published.
+    mapping(string runId => bool) private _publishedActivationRuns;
 
     // ── Events ─────────────────────────────────────────────────────────
 
@@ -39,7 +58,8 @@ contract RouteReceiver {
         string customerId,
         string recommendedChain,
         uint256 score,
-        uint256 timestamp
+        uint256 timestamp,
+        uint256 blockTimestamp
     );
 
     event ActivationPublished(
@@ -49,12 +69,16 @@ contract RouteReceiver {
         uint256 thresholdBps,
         string activeChainsCsv,
         string inactiveChainsCsv,
-        uint256 timestamp
+        uint256 timestamp,
+        uint256 blockTimestamp
     );
 
     event PublisherAdded(address indexed publisher);
     event PublisherRemoved(address indexed publisher);
+    event OwnershipTransferStarted(address indexed previousOwner, address indexed newOwner);
     event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
+    event Paused(address indexed account);
+    event Unpaused(address indexed account);
 
     // ── Modifiers ──────────────────────────────────────────────────────
 
@@ -65,6 +89,11 @@ contract RouteReceiver {
 
     modifier onlyPublisher() {
         require(publishers[msg.sender], "RouteReceiver: not authorized publisher");
+        _;
+    }
+
+    modifier whenNotPaused() {
+        if (paused) revert ContractPaused();
         _;
     }
 
@@ -91,32 +120,56 @@ contract RouteReceiver {
 
     // ── Ownership management ──────────────────────────────────────────
 
-    /// @notice Transfer contract ownership to a new address.
-    /// @dev Pre-mainnet: consider a two-step transfer pattern for safety.
+    /// @notice Initiates a two-step ownership transfer. The new owner must call `acceptOwnership`.
     function transferOwnership(address newOwner) external onlyOwner {
         require(newOwner != address(0), "RouteReceiver: zero address");
-        emit OwnershipTransferred(owner, newOwner);
-        owner = newOwner;
+        pendingOwner = newOwner;
+        emit OwnershipTransferStarted(owner, newOwner);
+    }
+
+    /// @notice Completes the ownership transfer. Must be called by `pendingOwner`.
+    function acceptOwnership() external {
+        require(msg.sender == pendingOwner, "RouteReceiver: not pending owner");
+        emit OwnershipTransferred(owner, pendingOwner);
+        owner = pendingOwner;
+        pendingOwner = address(0);
+    }
+
+    // ── Emergency pause ───────────────────────────────────────────────
+
+    /// @notice Pauses all write operations. Restricted to owner.
+    function pause() external onlyOwner {
+        paused = true;
+        emit Paused(msg.sender);
+    }
+
+    /// @notice Unpauses write operations. Restricted to owner.
+    function unpause() external onlyOwner {
+        paused = false;
+        emit Unpaused(msg.sender);
     }
 
     // ── Core write ─────────────────────────────────────────────────────
 
     /// @notice Publish a route scoring result. Reverts on duplicate runId.
-    /// @param runId       Canonical run identifier (idempotency key).
-    /// @param customerId  Customer this route belongs to.
-    /// @param recommendedChain  Winning chain after scoring.
-    /// @param score       Scaled integer score.
-    /// @param timestamp   Unix epoch seconds of the scoring run.
+    /// @param runId            Canonical run identifier (idempotency key).
+    /// @param customerId       Customer this route belongs to.
+    /// @param recommendedChain Winning chain after scoring.
+    /// @param score            Scaled integer score.
+    /// @param timestamp        Unix epoch seconds of the scoring run.
     function publishRoute(
         string calldata runId,
         string calldata customerId,
         string calldata recommendedChain,
         uint256 score,
         uint256 timestamp
-    ) external onlyPublisher {
-        require(!_publishedRuns[runId], "RouteReceiver: runId already published");
+    ) external onlyPublisher whenNotPaused {
+        if (bytes(runId).length > MAX_SHORT_STRING) revert StringTooLong();
+        if (bytes(customerId).length > MAX_SHORT_STRING) revert StringTooLong();
+        if (bytes(recommendedChain).length > MAX_SHORT_STRING) revert StringTooLong();
+        require(!_publishedRouteRuns[runId], "RouteReceiver: runId already published");
 
-        _publishedRuns[runId] = true;
+        _publishedRouteRuns[runId] = true;
         _latestRoutes[customerId] = RouteRecord({
             runId: runId,
             recommendedChain: recommendedChain,
@@ -130,7 +183,8 @@ contract RouteReceiver {
             customerId,
             recommendedChain,
             score,
-            timestamp
+            timestamp,
+            block.timestamp
         );
     }
 
@@ -143,10 +197,14 @@ contract RouteReceiver {
         string calldata activeChainsCsv,
         string calldata inactiveChainsCsv,
         uint256 timestamp
-    ) external onlyPublisher {
-        require(!_publishedRuns[runId], "RouteReceiver: runId already published");
+    ) external onlyPublisher whenNotPaused {
+        if (bytes(runId).length > MAX_SHORT_STRING) revert StringTooLong();
+        if (bytes(customerId).length > MAX_SHORT_STRING) revert StringTooLong();
+        if (bytes(activeChainsCsv).length > MAX_CSV_STRING) revert StringTooLong();
+        if (bytes(inactiveChainsCsv).length > MAX_CSV_STRING) revert StringTooLong();
+        require(!_publishedActivationRuns[runId], "RouteReceiver: runId already published");
 
-        _publishedRuns[runId] = true;
+        _publishedActivationRuns[runId] = true;
 
         emit ActivationPublished(
             runId,
@@ -155,7 +213,8 @@ contract RouteReceiver {
             thresholdBps,
             activeChainsCsv,
             inactiveChainsCsv,
-            timestamp
+            timestamp,
+            block.timestamp
         );
     }
 
@@ -182,10 +241,13 @@ contract RouteReceiver {
         return (r.runId, r.recommendedChain, r.score, r.timestamp);
     }
 
-    /// @notice Check whether a runId has already been published.
-    function isRunPublished(
-        string calldata runId
-    ) external view returns (bool) {
-        return _publishedRuns[runId];
+    /// @notice Check whether a runId has already been route-published.
+    function isRouteRunPublished(string calldata runId) external view returns (bool) {
+        return _publishedRouteRuns[runId];
+    }
+
+    /// @notice Check whether a runId has already been activation-published.
+    function isActivationRunPublished(string calldata runId) external view returns (bool) {
+        return _publishedActivationRuns[runId];
     }
 }

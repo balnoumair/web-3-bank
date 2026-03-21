@@ -21,6 +21,43 @@ contract MockUSDC is ERC20 {
     }
 }
 
+/// @dev ERC-20 with 18 decimals for testing decimal enforcement.
+contract MockToken18 is ERC20 {
+    constructor() ERC20("Token18", "TK18") {}
+
+    function mint(address to, uint256 amount) external {
+        _mint(to, amount);
+    }
+}
+
+/// @dev Malicious token that re-enters bank.deposit during transferFrom to test reentrancy guard.
+contract ReentrantToken is ERC20 {
+    Bank public immutable bank;
+    bool private _reentering;
+
+    constructor(address bank_) ERC20("Reentrant", "RE") {
+        bank = Bank(bank_);
+    }
+
+    function mint(address to, uint256 amount) external {
+        _mint(to, amount);
+    }
+
+    function decimals() public pure override returns (uint8) {
+        return 6;
+    }
+
+    function transferFrom(address from, address to, uint256 amount) public override returns (bool) {
+        if (!_reentering) {
+            _reentering = true;
+            // Attempt re-entry — should revert with ReentrancyGuard's error
+            bank.deposit(address(this), amount);
+            _reentering = false;
+        }
+        return super.transferFrom(from, to, amount);
+    }
+}
+
 /// @dev Minimal V2 used only to test UUPS upgrade.
 contract BankV2 is Bank {
     function version() external pure returns (string memory) {
@@ -66,6 +103,8 @@ contract BankTest is Test {
     );
     event HotPathReleased(address indexed to, uint256 amount, bytes32 indexed sourceEventHash);
     event FeeCollectorUpdated(address indexed feeCollector);
+    event TokenAllowed(address indexed token);
+    event TokenDisallowed(address indexed token);
 
     // ── Setup ──────────────────────────────────────────────────────────
 
@@ -99,6 +138,10 @@ contract BankTest is Test {
         // Deploy mock USDC and fund the user
         usdc = new MockUSDC();
         usdc.mint(user, 10_000e6);
+
+        // Allow USDC for deposit/withdrawal
+        vm.prank(admin);
+        bank.allowToken(address(usdc));
     }
 
     // ── Deployment ──────────────────────────────────────────────────────
@@ -158,6 +201,94 @@ contract BankTest is Test {
             abi.encodeCall(Bank.initialize, (admin, pauser, address(0), feeCollector));
         vm.expectRevert(Bank.ZeroAddress.selector);
         new ERC1967Proxy(address(impl), data);
+    }
+
+    // ── Token whitelist ──────────────────────────────────────────────────
+
+    function test_usdcIsAllowedAfterSetup() public view {
+        assertTrue(bank.allowedTokens(address(usdc)));
+    }
+
+    function test_adminCanAllowToken() public {
+        MockUSDC newToken = new MockUSDC();
+        vm.expectEmit(true, false, false, false);
+        emit TokenAllowed(address(newToken));
+        vm.prank(admin);
+        bank.allowToken(address(newToken));
+        assertTrue(bank.allowedTokens(address(newToken)));
+    }
+
+    function test_adminCanDisallowToken() public {
+        vm.expectEmit(true, false, false, false);
+        emit TokenDisallowed(address(usdc));
+        vm.prank(admin);
+        bank.disallowToken(address(usdc));
+        assertFalse(bank.allowedTokens(address(usdc)));
+    }
+
+    function test_nonAdminCannotAllowToken() public {
+        vm.prank(unauthorized);
+        vm.expectRevert();
+        bank.allowToken(address(usdc));
+    }
+
+    function test_allowTokenRevertsOnZeroAddress() public {
+        vm.prank(admin);
+        vm.expectRevert(Bank.ZeroAddress.selector);
+        bank.allowToken(address(0));
+    }
+
+    function test_depositRevertsForDisallowedToken() public {
+        MockUSDC unlisted = new MockUSDC();
+        unlisted.mint(user, 100e6);
+
+        vm.startPrank(user);
+        unlisted.approve(address(bank), 100e6);
+        vm.expectRevert(abi.encodeWithSelector(Bank.TokenNotAllowed.selector, address(unlisted)));
+        bank.deposit(address(unlisted), 100e6);
+        vm.stopPrank();
+    }
+
+    function test_withdrawRevertsForDisallowedToken() public {
+        _depositForUser(100e6);
+
+        MockUSDC unlisted = new MockUSDC();
+
+        vm.startPrank(user);
+        syncUSD.approve(address(bank), 100e6);
+        vm.expectRevert(abi.encodeWithSelector(Bank.TokenNotAllowed.selector, address(unlisted)));
+        bank.withdraw(address(unlisted), 100e6);
+        vm.stopPrank();
+    }
+
+    function test_depositRevertsForNonSixDecimalToken() public {
+        MockToken18 token18 = new MockToken18();
+        vm.prank(admin);
+        bank.allowToken(address(token18));
+
+        token18.mint(user, 100e18);
+        vm.startPrank(user);
+        token18.approve(address(bank), 100e18);
+        vm.expectRevert(
+            abi.encodeWithSelector(Bank.InvalidTokenDecimals.selector, address(token18), uint8(18))
+        );
+        bank.deposit(address(token18), 100e18);
+        vm.stopPrank();
+    }
+
+    // ── Reentrancy guard ─────────────────────────────────────────────────
+
+    function test_depositBlocksReentrancy() public {
+        ReentrantToken malicious = new ReentrantToken(address(bank));
+        vm.prank(admin);
+        bank.allowToken(address(malicious));
+
+        malicious.mint(user, 200e6);
+        vm.startPrank(user);
+        malicious.approve(address(bank), 200e6);
+        vm.expectRevert();
+        bank.deposit(address(malicious), 100e6);
+        vm.stopPrank();
     }
 
     // ── Deposit ─────────────────────────────────────────────────────────
@@ -585,6 +716,7 @@ contract BankTest is Test {
         assertEq(address(bank.syncUSD()), address(syncUSD));
         assertEq(bank.feeCollector(), feeCollector);
         assertTrue(bank.hasRole(RELAYER_ROLE, relayer));
+        assertTrue(bank.allowedTokens(address(usdc)));
     }
 
     function test_upgradeRevertsForUnauthorized() public {
