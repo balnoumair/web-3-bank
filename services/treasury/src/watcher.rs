@@ -41,6 +41,7 @@ use tonic::{Request, Response, Status};
 use tracing::{error, info, warn};
 
 use crate::config::Config;
+use crate::domain::events::{InitiatedEvent, ReleasedEvent};
 use crate::error::TxError;
 use crate::eth;
 use crate::proto::treasury::{GetWatcherAlertsRequest, GetWatcherAlertsResponse};
@@ -55,28 +56,6 @@ const MAX_BLOCK_RANGE: u64 = 2_000;
 const MAX_PAUSE_RETRIES: u32 = 3;
 /// Conservative gas limit for `pause()` — no storage writes beyond the flag.
 const PAUSE_GAS_LIMIT: u64 = 80_000;
-
-// ── Internal event types ──────────────────────────────────────────────────────
-
-/// A cached `HotPathInitiated` event from a source chain.
-#[derive(Debug, Clone)]
-struct InitiatedEvent {
-    source_chain_id: u64,
-    source_tx_hash: String,
-    recipient: Address,
-    amount: U256,
-}
-
-/// A `HotPathReleased` event observed on a destination chain.
-#[derive(Debug, Clone)]
-struct ReleasedEvent {
-    dest_chain_id: u64,
-    dest_tx_hash: String,
-    /// transferId == eventId from the corresponding HotPathInitiated.
-    transfer_id: B256,
-    recipient: Address,
-    amount: U256,
-}
 
 // ── Watcher module ───────────────────────────────────────────────────────────
 

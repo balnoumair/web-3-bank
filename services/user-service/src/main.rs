@@ -1,5 +1,6 @@
 mod config;
 mod db;
+pub mod domain;
 mod grpc;
 
 use grpc::user_service::UserServiceImpl;
