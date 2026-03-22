@@ -25,12 +25,12 @@ impl PgPoolSnapshotRepository {
 impl PoolSnapshotRepository for PgPoolSnapshotRepository {
     async fn record_snapshot(&self, chain_id: ChainId, depth: &U256) {
         let depth_str = depth.to_string();
-        if let Err(e) = sqlx::query(
+        if let Err(e) = sqlx::query_unchecked!(
             "INSERT INTO treasury.pool_snapshots (chain_id, depth_wei) \
              VALUES ($1, $2::NUMERIC)",
+            chain_id.0 as i64,
+            &depth_str,
         )
-        .bind(chain_id.0 as i64)
-        .bind(&depth_str)
         .execute(&self.pool)
         .await
         {
@@ -39,20 +39,19 @@ impl PoolSnapshotRepository for PgPoolSnapshotRepository {
     }
 
     async fn get_latest_depth(&self, chain_id: ChainId) -> Option<String> {
-        let row = sqlx::query(
-            "SELECT depth_wei::TEXT FROM treasury.pool_snapshots \
-             WHERE chain_id = $1 \
-             ORDER BY recorded_at DESC \
-             LIMIT 1",
+        let row = sqlx::query!(
+            r#"SELECT depth_wei::TEXT AS "depth_wei!" FROM treasury.pool_snapshots
+               WHERE chain_id = $1
+               ORDER BY recorded_at DESC
+               LIMIT 1"#,
+            chain_id.0 as i64,
         )
-        .bind(chain_id.0 as i64)
         .fetch_optional(&self.pool)
         .await
         .ok()
         .flatten()?;
 
-        use sqlx::Row;
-        row.try_get("depth_wei").ok()
+        Some(row.depth_wei)
     }
 }
 

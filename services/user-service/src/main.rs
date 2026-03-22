@@ -29,7 +29,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     })?;
 
     tracing::info!("Running migrations...");
-    sqlx::migrate!("src/db/migrations")
+    sqlx::migrate!("./migrations")
         .run(&pool)
         .await
         .map_err(|e| {
