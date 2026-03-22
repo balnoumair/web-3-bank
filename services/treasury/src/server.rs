@@ -10,17 +10,21 @@ use sqlx::PgPool;
 use tonic::{Request, Response, Status};
 use tracing::info;
 
+use crate::domain::repository::RelayRepository;
 use crate::hot_path::HotPath;
 use crate::pool_manager::PoolManager;
 use crate::proto::treasury::{
-    health_check_response, treasury_service_server::TreasuryService, GetPoolDepthRequest,
-    GetPoolDepthResponse, GetRelayStatusRequest, GetRelayStatusResponse, GetWatcherAlertsRequest,
-    GetWatcherAlertsResponse, HealthCheckRequest, HealthCheckResponse,
+    health_check_response, treasury_service_server::TreasuryService, GetBalanceRequest,
+    GetBalanceResponse, GetPoolDepthRequest, GetPoolDepthResponse, GetRecentTransfersRequest,
+    GetRecentTransfersResponse, GetRelayStatusRequest, GetRelayStatusResponse,
+    GetWatcherAlertsRequest, GetWatcherAlertsResponse, HealthCheckRequest, HealthCheckResponse,
+    TransferRecord,
 };
 use crate::watcher::Watcher;
 
 pub struct TreasuryServer {
     pub pool: PgPool,
+    pub relay_repo: Arc<dyn RelayRepository>,
     pub hot_path: Arc<HotPath>,
     pub pool_manager: Arc<PoolManager>,
     pub watcher: Arc<Watcher>,
@@ -78,6 +82,40 @@ impl TreasuryService for TreasuryServer {
         req: Request<GetWatcherAlertsRequest>,
     ) -> Result<Response<GetWatcherAlertsResponse>, Status> {
         self.watcher.get_watcher_alerts(req).await
+    }
+
+    async fn get_balance(
+        &self,
+        req: Request<GetBalanceRequest>,
+    ) -> Result<Response<GetBalanceResponse>, Status> {
+        let address = req.into_inner().address;
+        let balance_wei = self.relay_repo.get_balance(&address).await;
+        Ok(Response::new(GetBalanceResponse { balance_wei }))
+    }
+
+    async fn get_recent_transfers(
+        &self,
+        req: Request<GetRecentTransfersRequest>,
+    ) -> Result<Response<GetRecentTransfersResponse>, Status> {
+        let inner = req.into_inner();
+        let limit = inner.limit as i64;
+        let transfers = self
+            .relay_repo
+            .get_recent_transfers(&inner.address, limit)
+            .await
+            .into_iter()
+            .map(|r| TransferRecord {
+                source_event_hash: r.source_event_hash,
+                source_chain_id: r.source_chain_id as u64,
+                dest_chain_id: r.dest_chain_id as u64,
+                sender: r.sender,
+                recipient: r.recipient,
+                amount_wei: r.amount_wei,
+                status: r.status,
+                created_at: r.created_at,
+            })
+            .collect();
+        Ok(Response::new(GetRecentTransfersResponse { transfers }))
     }
 }
 

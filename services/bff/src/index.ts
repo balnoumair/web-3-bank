@@ -5,12 +5,12 @@ import { makeQueryResolvers, makeMutationResolvers } from "./resolvers/index.js"
 import { makeQueryUseCases } from "./application/queries.js";
 import { makeMutationUseCases } from "./application/mutations.js";
 import { GrpcUserServiceAdapter } from "./infrastructure/grpc/user-service.adapter.js";
-import { HttpTreasuryServiceAdapter } from "./infrastructure/http/treasury-service.adapter.js";
+import { GrpcTreasuryServiceAdapter } from "./infrastructure/grpc/treasury-service.adapter.js";
 
 // ── Composition root ──────────────────────────────────────────────────────────
 // Adapters (infrastructure)
 const userService = new GrpcUserServiceAdapter();
-const treasuryService = new HttpTreasuryServiceAdapter();
+const treasuryService = new GrpcTreasuryServiceAdapter();
 
 // Use cases (application)
 const queries = makeQueryUseCases(userService, treasuryService);

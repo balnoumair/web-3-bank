@@ -76,7 +76,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let watcher_repo = Arc::new(db::PgWatcherRepository::new(pool.clone()));
     let snapshot_repo = Arc::new(db::PgPoolSnapshotRepository::new(pool.clone()));
 
-    let hot_path = HotPath::new(relay_repo, Arc::clone(&cfg), http.clone());
+    let hot_path = HotPath::new(Arc::clone(&relay_repo), Arc::clone(&cfg), http.clone());
     let pool_manager = PoolManager::new(snapshot_repo, Arc::clone(&cfg), http.clone());
     let watcher = Watcher::new(watcher_repo, Arc::clone(&cfg), http.clone());
     let cold_path = ColdPath::new(rebalance_repo, Arc::clone(&cfg), http.clone());
@@ -93,6 +93,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let svc = TreasuryServer {
         pool,
+        relay_repo,
         hot_path,
         pool_manager,
         watcher,
