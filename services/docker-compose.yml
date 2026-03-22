@@ -1,12 +1,12 @@
 # Run from repo root: docker compose -f services/docker-compose.yml up
 services:
-  postgres:
+
+  # ── Databases (one per microservice) ──────────────────────────────────────────
+  postgres-user:
     image: postgres:16
     environment:
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: web3bank
-    ports:
-      - "5432:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 5s
@@ -15,18 +15,69 @@ services:
     networks:
       - internal
 
+  postgres-treasury:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: treasury
+      POSTGRES_PASSWORD: treasury
+      POSTGRES_DB: web3bank
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U treasury"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - internal
+
+  # ── Services ──────────────────────────────────────────────────────────────────
   user-service:
     build:
       context: ..
       dockerfile: services/user-service/Dockerfile
     environment:
-      DATABASE_URL: postgres://postgres:postgres@postgres:5432/web3bank
+      DATABASE_URL: postgres://postgres:postgres@postgres-user:5432/web3bank
       GRPC_ADDR: "0.0.0.0:50051"
     ports:
       - "50051:50051"
     depends_on:
-      postgres:
+      postgres-user:
         condition: service_healthy
+    networks:
+      - internal
+
+  treasury:
+    build:
+      context: ..
+      dockerfile: services/treasury/Dockerfile
+    environment:
+      DATABASE_URL: postgres://treasury:treasury@postgres-treasury:5432/web3bank
+      GRPC_PORT: 50052
+      # ── Blockchain config — override these for your environment ──────────────
+      RPC_URLS: '{"84532":"https://sepolia.base.org"}'
+      CONTRACT_ADDRESSES: '{"84532":"0x0000000000000000000000000000000000000000"}'
+      ROUTE_RECEIVER_ADDRESS: "0x0000000000000000000000000000000000000000"
+      RELAYER_KEY_PATH: /run/secrets/relayer.key
+    ports:
+      - "50052:50052"
+    depends_on:
+      postgres-treasury:
+        condition: service_healthy
+    networks:
+      - internal
+
+  bff:
+    build:
+      context: ..
+      dockerfile: services/bff/Dockerfile
+    environment:
+      PORT: "4000"
+      USER_SERVICE_ADDR: "user-service:50051"
+      TREASURY_SERVICE_ADDR: "treasury:50052"
+    ports:
+      - "4000:4000"
+    depends_on:
+      - user-service
+      - treasury
     networks:
       - internal
 

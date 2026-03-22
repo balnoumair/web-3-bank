@@ -11,6 +11,20 @@ use crate::domain::events::HotPathEvent;
 use crate::domain::newtypes::{ChainId, EventHash, OperationId, TxHash};
 use crate::domain::status::{AlertType, RelayStatus};
 
+// ── Shared types ─────────────────────────────────────────────────────────────
+
+/// A relay log row returned by user-facing transfer queries.
+pub struct TransferRow {
+    pub source_event_hash: String,
+    pub source_chain_id: i64,
+    pub dest_chain_id: i64,
+    pub sender: String,
+    pub recipient: String,
+    pub amount_wei: String,
+    pub status: String,
+    pub created_at: String,
+}
+
 // ── Relay repository (hot-path) ─────────────────────────────────────────────
 
 #[async_trait]
@@ -40,6 +54,13 @@ pub trait RelayRepository: Send + Sync {
     /// Get the relay status for a source event hash. Returns `None` if
     /// no relay log exists.
     async fn get_relay_status(&self, source_event_hash: &EventHash) -> Option<String>;
+
+    /// Sum of `amount_wei` for all completed relays to this recipient address.
+    /// Returns `"0"` if none found.
+    async fn get_balance(&self, address: &str) -> String;
+
+    /// Most recent relay log rows for a recipient address, newest first.
+    async fn get_recent_transfers(&self, address: &str, limit: i64) -> Vec<TransferRow>;
 }
 
 // ── Watcher repository ──────────────────────────────────────────────────────

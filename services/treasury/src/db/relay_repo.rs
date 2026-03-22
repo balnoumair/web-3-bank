@@ -5,12 +5,12 @@
 //! `treasury.relay_logs`.
 
 use async_trait::async_trait;
-use sqlx::PgPool;
+use sqlx::{PgPool, Row};
 use tracing::error;
 
 use crate::domain::events::HotPathEvent;
 use crate::domain::newtypes::{EventHash, TxHash};
-use crate::domain::repository::RelayRepository;
+use crate::domain::repository::{RelayRepository, TransferRow};
 use crate::domain::status::RelayStatus;
 use crate::eth;
 
@@ -48,14 +48,15 @@ impl RelayRepository for PgRelayRepository {
             r#"
             INSERT INTO treasury.relay_logs
                 (source_event_hash, dest_tx_hash, source_chain_id, dest_chain_id,
-                 recipient, amount_wei, status)
-            VALUES ($1, $2, $3, $4, $5, $6::NUMERIC, $7)
+                 sender, recipient, amount_wei, status)
+            VALUES ($1, $2, $3, $4, $5, $6, $7::NUMERIC, $8)
             ON CONFLICT (source_event_hash) DO NOTHING
             "#,
             event.source_event_hash.as_str(),
             dest_tx_hash.map(|h| h.as_str()),
             event.source_chain_id.0 as i64,
             event.dest_chain_id.0 as i64,
+            &event.sender,
             &recipient_str,
             &amount_str,
             status.as_str(),
@@ -111,6 +112,50 @@ impl RelayRepository for PgRelayRepository {
         .await
         .ok()
         .flatten()
+    }
+
+    async fn get_balance(&self, address: &str) -> String {
+        sqlx::query(
+            "SELECT COALESCE(SUM(amount_wei), 0)::TEXT AS balance \
+             FROM treasury.relay_logs \
+             WHERE recipient = $1 AND status = 'completed'",
+        )
+        .bind(address)
+        .fetch_one(&self.pool)
+        .await
+        .and_then(|row| row.try_get::<String, _>("balance"))
+        .unwrap_or_else(|_| "0".to_string())
+    }
+
+    async fn get_recent_transfers(&self, address: &str, limit: i64) -> Vec<TransferRow> {
+        let rows = sqlx::query(
+            "SELECT source_event_hash, source_chain_id, dest_chain_id, sender, recipient, \
+                    amount_wei::TEXT AS amount_wei, status, created_at::TEXT AS created_at \
+             FROM treasury.relay_logs \
+             WHERE recipient = $1 \
+             ORDER BY created_at DESC \
+             LIMIT $2",
+        )
+        .bind(address)
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await
+        .unwrap_or_default();
+
+        rows.into_iter()
+            .filter_map(|row| {
+                Some(TransferRow {
+                    source_event_hash: row.try_get("source_event_hash").ok()?,
+                    source_chain_id: row.try_get("source_chain_id").ok()?,
+                    dest_chain_id: row.try_get("dest_chain_id").ok()?,
+                    sender: row.try_get("sender").ok()?,
+                    recipient: row.try_get("recipient").ok()?,
+                    amount_wei: row.try_get("amount_wei").ok()?,
+                    status: row.try_get("status").ok()?,
+                    created_at: row.try_get("created_at").ok()?,
+                })
+            })
+            .collect()
     }
 }
 

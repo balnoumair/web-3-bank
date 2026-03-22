@@ -12,6 +12,10 @@ service TreasuryService {
 
   // Watcher — implemented in Task 06
   rpc GetWatcherAlerts(GetWatcherAlertsRequest) returns (GetWatcherAlertsResponse);
+
+  // User-facing queries
+  rpc GetBalance(GetBalanceRequest) returns (GetBalanceResponse);
+  rpc GetRecentTransfers(GetRecentTransfersRequest) returns (GetRecentTransfersResponse);
 }
 
 message HealthCheckRequest {}
@@ -35,3 +39,22 @@ message GetPoolDepthResponse   { string depth_wei = 1; }
 
 message GetWatcherAlertsRequest  { uint32 limit = 1; }
 message GetWatcherAlertsResponse { repeated string alert_ids = 1; }
+
+message GetBalanceRequest  { string address = 1; }
+message GetBalanceResponse { string balance_wei = 1; }
+
+message GetRecentTransfersRequest {
+  string address = 1;
+  uint32 limit   = 2;
+}
+message TransferRecord {
+  string source_event_hash = 1;
+  uint64 source_chain_id   = 2;
+  uint64 dest_chain_id     = 3;
+  string sender            = 4;
+  string recipient         = 5;
+  string amount_wei        = 6;
+  string status            = 7;
+  string created_at        = 8;
+}
+message GetRecentTransfersResponse { repeated TransferRecord transfers = 1; }

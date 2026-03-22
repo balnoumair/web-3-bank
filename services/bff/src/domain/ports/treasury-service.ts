@@ -12,7 +12,7 @@ export type Transfer = {
   txHash: string;
 };
 
-/** Driven port — implemented by the HTTP treasury-service adapter. */
+/** Driven port — implemented by the gRPC treasury-service adapter. */
 export interface ITreasuryService {
   getBalance(address: string): Promise<string>;
   getPoolDepth(chainId: number): Promise<PoolDepth>;
