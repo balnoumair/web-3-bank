@@ -8,10 +8,14 @@
 pub struct ChainId(pub u64);
 
 impl From<u64> for ChainId {
-    fn from(v: u64) -> Self { ChainId(v) }
+    fn from(v: u64) -> Self {
+        ChainId(v)
+    }
 }
 impl From<ChainId> for u64 {
-    fn from(c: ChainId) -> Self { c.0 }
+    fn from(c: ChainId) -> Self {
+        c.0
+    }
 }
 impl std::fmt::Display for ChainId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -24,7 +28,9 @@ impl std::fmt::Display for ChainId {
 pub struct OperationId(pub String);
 
 impl OperationId {
-    pub fn as_str(&self) -> &str { &self.0 }
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
 }
 impl std::fmt::Display for OperationId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -33,7 +39,9 @@ impl std::fmt::Display for OperationId {
 }
 impl std::ops::Deref for OperationId {
     type Target = str;
-    fn deref(&self) -> &str { &self.0 }
+    fn deref(&self) -> &str {
+        &self.0
+    }
 }
 
 /// A transaction hash (hex string, "0x…").
@@ -41,7 +49,9 @@ impl std::ops::Deref for OperationId {
 pub struct TxHash(pub String);
 
 impl TxHash {
-    pub fn as_str(&self) -> &str { &self.0 }
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
 }
 impl std::fmt::Display for TxHash {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -50,7 +60,9 @@ impl std::fmt::Display for TxHash {
 }
 impl std::ops::Deref for TxHash {
     type Target = str;
-    fn deref(&self) -> &str { &self.0 }
+    fn deref(&self) -> &str {
+        &self.0
+    }
 }
 
 /// A source event hash (relay idempotency key).
@@ -58,7 +70,9 @@ impl std::ops::Deref for TxHash {
 pub struct EventHash(pub String);
 
 impl EventHash {
-    pub fn as_str(&self) -> &str { &self.0 }
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
 }
 impl std::fmt::Display for EventHash {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -67,5 +81,7 @@ impl std::fmt::Display for EventHash {
 }
 impl std::ops::Deref for EventHash {
     type Target = str;
-    fn deref(&self) -> &str { &self.0 }
+    fn deref(&self) -> &str {
+        &self.0
+    }
 }

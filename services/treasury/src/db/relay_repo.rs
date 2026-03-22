@@ -117,9 +117,9 @@ impl RelayRepository for PgRelayRepository {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::events::HotPathEvent;
     use crate::domain::newtypes::{ChainId, EventHash, TxHash};
     use crate::domain::status::RelayStatus;
-    use crate::domain::events::HotPathEvent;
     use alloy_primitives::{Address, B256, U256};
     use sqlx::PgPool;
 
@@ -141,7 +141,8 @@ mod tests {
         let event = make_event("0xhash1", 1, 2, 1000);
 
         assert!(!repo.relay_already_recorded(&event.source_event_hash).await);
-        repo.insert_relay_log(&event, None, RelayStatus::Pending).await;
+        repo.insert_relay_log(&event, None, RelayStatus::Pending)
+            .await;
         assert!(repo.relay_already_recorded(&event.source_event_hash).await);
     }
 
@@ -150,8 +151,10 @@ mod tests {
         let repo = PgRelayRepository::new(pool);
         let event = make_event("0xhash2", 1, 2, 500);
 
-        repo.insert_relay_log(&event, None, RelayStatus::Pending).await;
-        repo.insert_relay_log(&event, None, RelayStatus::Completed).await; // should be ignored
+        repo.insert_relay_log(&event, None, RelayStatus::Pending)
+            .await;
+        repo.insert_relay_log(&event, None, RelayStatus::Completed)
+            .await; // should be ignored
         let status = repo.get_relay_status(&event.source_event_hash).await;
         assert_eq!(status.as_deref(), Some("pending")); // ON CONFLICT DO NOTHING
     }
@@ -162,8 +165,10 @@ mod tests {
         let event = make_event("0xhash3", 1, 2, 200);
         let tx = TxHash("0xdestTx".to_string());
 
-        repo.insert_relay_log(&event, None, RelayStatus::Pending).await;
-        repo.update_relay_log(&event.source_event_hash, &tx, RelayStatus::Completed).await;
+        repo.insert_relay_log(&event, None, RelayStatus::Pending)
+            .await;
+        repo.update_relay_log(&event.source_event_hash, &tx, RelayStatus::Completed)
+            .await;
 
         let status = repo.get_relay_status(&event.source_event_hash).await;
         assert_eq!(status.as_deref(), Some("completed"));
@@ -174,7 +179,8 @@ mod tests {
         let repo = PgRelayRepository::new(pool);
         let event = make_event("0xhash4", 1, 2, 100);
 
-        repo.insert_relay_log(&event, None, RelayStatus::Pending).await;
+        repo.insert_relay_log(&event, None, RelayStatus::Pending)
+            .await;
         repo.update_relay_log_failed(&event.source_event_hash).await;
 
         let status = repo.get_relay_status(&event.source_event_hash).await;

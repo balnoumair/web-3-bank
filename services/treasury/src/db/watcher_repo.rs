@@ -76,7 +76,8 @@ mod tests {
         let transfer_id = "0xdeadbeef";
 
         assert!(!repo.already_verified(transfer_id).await);
-        repo.insert_alert(transfer_id, AlertType::Verified, r#"{"ok": true}"#).await;
+        repo.insert_alert(transfer_id, AlertType::Verified, r#"{"ok": true}"#)
+            .await;
         assert!(repo.already_verified(transfer_id).await);
     }
 
@@ -85,8 +86,10 @@ mod tests {
         let repo = PgWatcherRepository::new(pool);
         let transfer_id = "0xdeadbeef2";
 
-        repo.insert_alert(transfer_id, AlertType::Verified, "{}").await;
-        repo.insert_alert(transfer_id, AlertType::Mismatch, "{}").await; // ON CONFLICT DO NOTHING
+        repo.insert_alert(transfer_id, AlertType::Verified, "{}")
+            .await;
+        repo.insert_alert(transfer_id, AlertType::Mismatch, "{}")
+            .await; // ON CONFLICT DO NOTHING
         let ids = repo.get_alert_ids(10).await.unwrap();
         // only one alert inserted
         assert_eq!(ids.len(), 1);
@@ -106,7 +109,12 @@ mod tests {
     #[sqlx::test(migrations = "migrations")]
     async fn mismatch_alert_persisted(pool: PgPool) {
         let repo = PgWatcherRepository::new(pool);
-        repo.insert_alert("0xmismatch", AlertType::Mismatch, r#"{"reason":"amount_mismatch"}"#).await;
+        repo.insert_alert(
+            "0xmismatch",
+            AlertType::Mismatch,
+            r#"{"reason":"amount_mismatch"}"#,
+        )
+        .await;
         assert!(repo.already_verified("0xmismatch").await);
     }
 }

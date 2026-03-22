@@ -27,7 +27,11 @@ pub struct PoolManager {
 }
 
 impl PoolManager {
-    pub fn new(snapshot_repo: Arc<dyn PoolSnapshotRepository>, config: Arc<Config>, http: reqwest::Client) -> Arc<Self> {
+    pub fn new(
+        snapshot_repo: Arc<dyn PoolSnapshotRepository>,
+        config: Arc<Config>,
+        http: reqwest::Client,
+    ) -> Arc<Self> {
         use alloy_primitives::keccak256;
         let hash = keccak256(b"poolDepth()");
         let mut sel = [0u8; 4];
@@ -79,9 +83,18 @@ impl PoolManager {
                 .collect();
 
             for (chain_id, rpc_url, bank_addr) in chains {
-                match eth::fetch_pool_depth(&self.http, &rpc_url, &bank_addr, &self.pool_depth_selector).await {
+                match eth::fetch_pool_depth(
+                    &self.http,
+                    &rpc_url,
+                    &bank_addr,
+                    &self.pool_depth_selector,
+                )
+                .await
+                {
                     Some(depth) => {
-                        self.snapshot_repo.record_snapshot(ChainId(chain_id), &depth).await;
+                        self.snapshot_repo
+                            .record_snapshot(ChainId(chain_id), &depth)
+                            .await;
                         info!(chain = chain_id, depth = %depth, "pool_manager: snapshot recorded");
                     }
                     None => {
@@ -93,5 +106,4 @@ impl PoolManager {
             tokio::time::sleep(POLL_INTERVAL).await;
         }
     }
-
 }

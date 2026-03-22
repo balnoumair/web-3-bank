@@ -143,8 +143,10 @@ mod tests {
         let op_id = OperationId("chain3-chain4-002".to_string());
         let tx = TxHash("0xcciptx".to_string());
 
-        repo.insert_rebalance_op(&op_id, ChainId(3), ChainId(4), &U256::from(100u64)).await;
-        repo.update_rebalance_op_submitted(&op_id, &tx, Some("0xmsgid")).await;
+        repo.insert_rebalance_op(&op_id, ChainId(3), ChainId(4), &U256::from(100u64))
+            .await;
+        repo.update_rebalance_op_submitted(&op_id, &tx, Some("0xmsgid"))
+            .await;
         // op is still "in flight" after submitted (within 24h window)
         assert!(repo.op_in_flight(ChainId(3), ChainId(4)).await);
     }
@@ -154,7 +156,8 @@ mod tests {
         let repo = PgRebalanceRepository::new(pool);
         let op_id = OperationId("chain5-chain6-003".to_string());
 
-        repo.insert_rebalance_op(&op_id, ChainId(5), ChainId(6), &U256::from(200u64)).await;
+        repo.insert_rebalance_op(&op_id, ChainId(5), ChainId(6), &U256::from(200u64))
+            .await;
         assert!(repo.op_in_flight(ChainId(5), ChainId(6)).await);
         repo.update_rebalance_op_failed(&op_id).await;
         // failed ops are NOT in_flight

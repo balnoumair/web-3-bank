@@ -92,7 +92,11 @@ mod tests {
     async fn test_insert_user_default_display_name(pool: PgPool) {
         let repo = PgUserRepository::new(pool);
         let id = repo.insert(None).await.unwrap();
-        let user = repo.get_by_id(id).await.unwrap().expect("user should exist");
+        let user = repo
+            .get_by_id(id)
+            .await
+            .unwrap()
+            .expect("user should exist");
         assert_eq!(user.display_name, "");
         assert_eq!(user.status, UserStatus::Active);
     }
@@ -101,7 +105,11 @@ mod tests {
     async fn test_insert_user_with_display_name(pool: PgPool) {
         let repo = PgUserRepository::new(pool);
         let id = repo.insert(Some("Alice")).await.unwrap();
-        let user = repo.get_by_id(id).await.unwrap().expect("user should exist");
+        let user = repo
+            .get_by_id(id)
+            .await
+            .unwrap()
+            .expect("user should exist");
         assert_eq!(user.display_name, "Alice");
     }
 
@@ -117,7 +125,11 @@ mod tests {
         let repo = PgUserRepository::new(pool);
         let id = repo.insert(Some("Old Name")).await.unwrap();
         repo.update_display_name(id, "New Name").await.unwrap();
-        let user = repo.get_by_id(id).await.unwrap().expect("user should exist");
+        let user = repo
+            .get_by_id(id)
+            .await
+            .unwrap()
+            .expect("user should exist");
         assert_eq!(user.display_name, "New Name");
     }
 }

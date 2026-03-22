@@ -86,7 +86,11 @@ pub struct Watcher {
 impl Watcher {
     /// Construct an `Arc<Watcher>`.  Call `spawn_background` on the returned
     /// value to start the verification loops.
-    pub fn new(watcher_repo: Arc<dyn WatcherRepository>, config: Arc<Config>, http: reqwest::Client) -> Arc<Self> {
+    pub fn new(
+        watcher_repo: Arc<dyn WatcherRepository>,
+        config: Arc<Config>,
+        http: reqwest::Client,
+    ) -> Arc<Self> {
         let (pauser_key, pauser_address) = match &config.pauser_key_path {
             Some(path) => eth::load_signing_key(path),
             None => (None, None),
@@ -177,12 +181,7 @@ impl Watcher {
 
                 let topic = format!("{}", self.hot_path_initiated_topic);
                 let logs = eth::fetch_logs(
-                    &self.http,
-                    &rpc_url,
-                    &bank_addr,
-                    &topic,
-                    scan_from,
-                    to_block,
+                    &self.http, &rpc_url, &bank_addr, &topic, scan_from, to_block,
                 )
                 .await;
 
@@ -236,12 +235,7 @@ impl Watcher {
 
                 let topic = format!("{}", self.hot_path_released_topic);
                 let logs = eth::fetch_logs(
-                    &self.http,
-                    &rpc_url,
-                    &bank_addr,
-                    &topic,
-                    scan_from,
-                    to_block,
+                    &self.http, &rpc_url, &bank_addr, &topic, scan_from, to_block,
                 )
                 .await;
 
@@ -345,7 +339,8 @@ impl Watcher {
             }
         };
 
-        self.watcher_repo.insert_alert(&transfer_id_hex, alert_type, &detail)
+        self.watcher_repo
+            .insert_alert(&transfer_id_hex, alert_type, &detail)
             .await;
     }
 

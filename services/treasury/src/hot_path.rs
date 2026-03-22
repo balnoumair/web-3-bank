@@ -78,7 +78,11 @@ pub struct HotPath {
 impl HotPath {
     /// Construct an `Arc<HotPath>`. Call `spawn_background` on the returned
     /// value to start the event-listener and route-receiver loops.
-    pub fn new(relay_repo: Arc<dyn RelayRepository>, config: Arc<Config>, http: reqwest::Client) -> Arc<Self> {
+    pub fn new(
+        relay_repo: Arc<dyn RelayRepository>,
+        config: Arc<Config>,
+        http: reqwest::Client,
+    ) -> Arc<Self> {
         let (relayer_key, relayer_address) = eth::load_signing_key(&config.relayer_key_path);
 
         // Seed active chains with every chain that has an RPC URL so the relay
@@ -173,12 +177,7 @@ impl HotPath {
 
                 let topic = format!("{}", self.hot_path_topic);
                 let logs = eth::fetch_logs(
-                    &self.http,
-                    &rpc_url,
-                    &bank_addr,
-                    &topic,
-                    scan_from,
-                    to_block,
+                    &self.http, &rpc_url, &bank_addr, &topic, scan_from, to_block,
                 )
                 .await;
 
@@ -242,7 +241,8 @@ impl HotPath {
             for log in &logs {
                 if let Some(chains) = eth::decode_active_chains_from_event(&log.data) {
                     // decode_active_chains_from_event returns HashSet<u64>; convert to HashSet<ChainId>
-                    let chains_converted: HashSet<ChainId> = chains.into_iter().map(ChainId).collect();
+                    let chains_converted: HashSet<ChainId> =
+                        chains.into_iter().map(ChainId).collect();
                     info!(chains = ?chains_converted, "hot_path: activation state updated from RouteReceiver");
                     *self.active_chains.write().await = chains_converted;
                 }
@@ -257,7 +257,11 @@ impl HotPath {
 
     async fn relay_event(&self, event: HotPathEvent) {
         // 1. Idempotency guard.
-        if self.relay_repo.relay_already_recorded(&event.source_event_hash).await {
+        if self
+            .relay_repo
+            .relay_already_recorded(&event.source_event_hash)
+            .await
+        {
             return;
         }
 
@@ -344,7 +348,9 @@ impl HotPath {
         }
 
         // 6. Record pending.
-        self.relay_repo.insert_relay_log(&event, None, RelayStatus::Pending).await;
+        self.relay_repo
+            .insert_relay_log(&event, None, RelayStatus::Pending)
+            .await;
 
         // 7. Submit with retry.
         match self
@@ -357,7 +363,8 @@ impl HotPath {
                     dest_tx = %tx_hash,
                     "hot_path: relay completed"
                 );
-                self.relay_repo.update_relay_log(&event.source_event_hash, &tx_hash, RelayStatus::Completed)
+                self.relay_repo
+                    .update_relay_log(&event.source_event_hash, &tx_hash, RelayStatus::Completed)
                     .await;
             }
             Err(e) => {
@@ -366,7 +373,9 @@ impl HotPath {
                     err = %e,
                     "hot_path: relay failed after retries"
                 );
-                self.relay_repo.update_relay_log_failed(&event.source_event_hash).await;
+                self.relay_repo
+                    .update_relay_log_failed(&event.source_event_hash)
+                    .await;
             }
         }
     }
@@ -377,10 +386,7 @@ impl HotPath {
         bank_addr: &str,
         event: &HotPathEvent,
     ) -> Result<TxHash, TxError> {
-        let key = self
-            .relayer_key
-            .as_ref()
-            .ok_or(TxError::MissingKey)?;
+        let key = self.relayer_key.as_ref().ok_or(TxError::MissingKey)?;
 
         let chain_id = event.dest_chain_id;
         let mut delay = Duration::from_secs(1);
@@ -407,7 +413,9 @@ impl HotPath {
             }
         }
 
-        Err(TxError::RetryExhausted { attempts: MAX_RELAY_RETRIES })
+        Err(TxError::RetryExhausted {
+            attempts: MAX_RELAY_RETRIES,
+        })
     }
 
     async fn submit_release_once(
@@ -418,9 +426,7 @@ impl HotPath {
         key: &SigningKey,
         chain_id: ChainId,
     ) -> Result<TxHash, TxError> {
-        let relayer_addr = self
-            .relayer_address
-            .ok_or(TxError::MissingKey)?;
+        let relayer_addr = self.relayer_address.ok_or(TxError::MissingKey)?;
 
         let nonce = self.get_nonce(rpc_url, chain_id, &relayer_addr).await?;
         let (max_fee, max_priority_fee) = eth::fetch_gas_params(&self.http, rpc_url).await?;
@@ -476,7 +482,11 @@ impl HotPath {
 
     // ── Event parsing ─────────────────────────────────────────────────────────
 
-    fn parse_hot_path_event(&self, log: &eth::RpcLog, source_chain_id: ChainId) -> Option<HotPathEvent> {
+    fn parse_hot_path_event(
+        &self,
+        log: &eth::RpcLog,
+        source_chain_id: ChainId,
+    ) -> Option<HotPathEvent> {
         // topics[0] = event selector
         // topics[1] = indexed sender   (address, left-padded to 32 bytes)
         // topics[2] = indexed to       (address, left-padded to 32 bytes)

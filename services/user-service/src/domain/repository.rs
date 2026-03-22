@@ -41,11 +41,7 @@ pub trait CredentialRepository: Send + Sync {
 
     /// List credentials for a user. When `active_only` is true, excludes
     /// revoked credentials.
-    async fn list(
-        &self,
-        user_id: Uuid,
-        active_only: bool,
-    ) -> Result<Vec<Credential>, DomainError>;
+    async fn list(&self, user_id: Uuid, active_only: bool) -> Result<Vec<Credential>, DomainError>;
 
     /// Revoke a credential. Enforces the business rule that a user must
     /// retain at least one active credential.
