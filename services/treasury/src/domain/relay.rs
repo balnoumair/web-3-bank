@@ -63,37 +63,32 @@ mod tests {
 
     #[test]
     fn inactive_chain_rejected() {
-        let decision =
-            evaluate_relay_eligibility(false, U256::from(1000u64), U256::from(100u64));
+        let decision = evaluate_relay_eligibility(false, U256::from(1000u64), U256::from(100u64));
         assert_eq!(decision, RelayDecision::RejectedInactiveChain);
     }
 
     #[test]
     fn insufficient_depth_rejected() {
-        let decision =
-            evaluate_relay_eligibility(true, U256::from(50u64), U256::from(100u64));
+        let decision = evaluate_relay_eligibility(true, U256::from(50u64), U256::from(100u64));
         assert_eq!(decision, RelayDecision::RejectedInsufficientDepth);
     }
 
     #[test]
     fn exact_depth_approved() {
-        let decision =
-            evaluate_relay_eligibility(true, U256::from(100u64), U256::from(100u64));
+        let decision = evaluate_relay_eligibility(true, U256::from(100u64), U256::from(100u64));
         assert_eq!(decision, RelayDecision::Approved);
     }
 
     #[test]
     fn surplus_depth_approved() {
-        let decision =
-            evaluate_relay_eligibility(true, U256::from(500u64), U256::from(100u64));
+        let decision = evaluate_relay_eligibility(true, U256::from(500u64), U256::from(100u64));
         assert_eq!(decision, RelayDecision::Approved);
     }
 
     #[test]
     fn inactive_chain_overrides_sufficient_depth() {
         // Even if pool depth is fine, inactive chain must be rejected.
-        let decision =
-            evaluate_relay_eligibility(false, U256::from(9999u64), U256::from(1u64));
+        let decision = evaluate_relay_eligibility(false, U256::from(9999u64), U256::from(1u64));
         assert_eq!(decision, RelayDecision::RejectedInactiveChain);
     }
 

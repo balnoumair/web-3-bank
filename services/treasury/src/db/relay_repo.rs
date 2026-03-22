@@ -27,12 +27,13 @@ impl PgRelayRepository {
 #[async_trait]
 impl RelayRepository for PgRelayRepository {
     async fn relay_already_recorded(&self, source_event_hash: &EventHash) -> bool {
-        sqlx::query("SELECT 1 FROM treasury.relay_logs WHERE source_event_hash = $1")
-            .bind(source_event_hash.as_str())
-            .fetch_optional(&self.pool)
-            .await
-            .map(|r| r.is_some())
-            .unwrap_or(false)
+        sqlx::query_scalar!(
+            "SELECT EXISTS(SELECT 1 FROM treasury.relay_logs WHERE source_event_hash = $1)",
+            source_event_hash.as_str()
+        )
+        .fetch_one(&self.pool)
+        .await
+        .unwrap_or(false)
     }
 
     async fn insert_relay_log(
@@ -43,7 +44,7 @@ impl RelayRepository for PgRelayRepository {
     ) {
         let amount_str = event.amount.to_string();
         let recipient_str = format!("0x{}", eth::bytes_to_hex(event.recipient.as_slice()));
-        if let Err(e) = sqlx::query(
+        if let Err(e) = sqlx::query_unchecked!(
             r#"
             INSERT INTO treasury.relay_logs
                 (source_event_hash, dest_tx_hash, source_chain_id, dest_chain_id,
@@ -51,14 +52,14 @@ impl RelayRepository for PgRelayRepository {
             VALUES ($1, $2, $3, $4, $5, $6::NUMERIC, $7)
             ON CONFLICT (source_event_hash) DO NOTHING
             "#,
+            event.source_event_hash.as_str(),
+            dest_tx_hash.map(|h| h.as_str()),
+            event.source_chain_id.0 as i64,
+            event.dest_chain_id.0 as i64,
+            &recipient_str,
+            &amount_str,
+            status.as_str(),
         )
-        .bind(event.source_event_hash.as_str())
-        .bind(dest_tx_hash.map(|h| h.as_str()))
-        .bind(event.source_chain_id.0 as i64)
-        .bind(event.dest_chain_id.0 as i64)
-        .bind(&recipient_str)
-        .bind(&amount_str)
-        .bind(status.as_str())
         .execute(&self.pool)
         .await
         {
@@ -72,14 +73,14 @@ impl RelayRepository for PgRelayRepository {
         dest_tx_hash: &TxHash,
         status: RelayStatus,
     ) {
-        if let Err(e) = sqlx::query(
+        if let Err(e) = sqlx::query!(
             "UPDATE treasury.relay_logs \
              SET dest_tx_hash = $1, status = $2, updated_at = now() \
              WHERE source_event_hash = $3",
+            dest_tx_hash.as_str(),
+            status.as_str(),
+            source_event_hash.as_str(),
         )
-        .bind(dest_tx_hash.as_str())
-        .bind(status.as_str())
-        .bind(source_event_hash.as_str())
         .execute(&self.pool)
         .await
         {
@@ -88,12 +89,12 @@ impl RelayRepository for PgRelayRepository {
     }
 
     async fn update_relay_log_failed(&self, source_event_hash: &EventHash) {
-        if let Err(e) = sqlx::query(
+        if let Err(e) = sqlx::query!(
             "UPDATE treasury.relay_logs \
              SET status = 'failed', updated_at = now() \
              WHERE source_event_hash = $1",
+            source_event_hash.as_str(),
         )
-        .bind(source_event_hash.as_str())
         .execute(&self.pool)
         .await
         {
@@ -102,25 +103,23 @@ impl RelayRepository for PgRelayRepository {
     }
 
     async fn get_relay_status(&self, source_event_hash: &EventHash) -> Option<String> {
-        let row =
-            sqlx::query("SELECT status FROM treasury.relay_logs WHERE source_event_hash = $1")
-                .bind(source_event_hash.as_str())
-                .fetch_optional(&self.pool)
-                .await
-                .ok()
-                .flatten()?;
-
-        use sqlx::Row;
-        row.try_get("status").ok()
+        sqlx::query_scalar!(
+            "SELECT status FROM treasury.relay_logs WHERE source_event_hash = $1",
+            source_event_hash.as_str()
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .ok()
+        .flatten()
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::events::HotPathEvent;
     use crate::domain::newtypes::{ChainId, EventHash, TxHash};
     use crate::domain::status::RelayStatus;
-    use crate::domain::events::HotPathEvent;
     use alloy_primitives::{Address, B256, U256};
     use sqlx::PgPool;
 
@@ -142,7 +141,8 @@ mod tests {
         let event = make_event("0xhash1", 1, 2, 1000);
 
         assert!(!repo.relay_already_recorded(&event.source_event_hash).await);
-        repo.insert_relay_log(&event, None, RelayStatus::Pending).await;
+        repo.insert_relay_log(&event, None, RelayStatus::Pending)
+            .await;
         assert!(repo.relay_already_recorded(&event.source_event_hash).await);
     }
 
@@ -151,8 +151,10 @@ mod tests {
         let repo = PgRelayRepository::new(pool);
         let event = make_event("0xhash2", 1, 2, 500);
 
-        repo.insert_relay_log(&event, None, RelayStatus::Pending).await;
-        repo.insert_relay_log(&event, None, RelayStatus::Completed).await; // should be ignored
+        repo.insert_relay_log(&event, None, RelayStatus::Pending)
+            .await;
+        repo.insert_relay_log(&event, None, RelayStatus::Completed)
+            .await; // should be ignored
         let status = repo.get_relay_status(&event.source_event_hash).await;
         assert_eq!(status.as_deref(), Some("pending")); // ON CONFLICT DO NOTHING
     }
@@ -163,8 +165,10 @@ mod tests {
         let event = make_event("0xhash3", 1, 2, 200);
         let tx = TxHash("0xdestTx".to_string());
 
-        repo.insert_relay_log(&event, None, RelayStatus::Pending).await;
-        repo.update_relay_log(&event.source_event_hash, &tx, RelayStatus::Completed).await;
+        repo.insert_relay_log(&event, None, RelayStatus::Pending)
+            .await;
+        repo.update_relay_log(&event.source_event_hash, &tx, RelayStatus::Completed)
+            .await;
 
         let status = repo.get_relay_status(&event.source_event_hash).await;
         assert_eq!(status.as_deref(), Some("completed"));
@@ -175,7 +179,8 @@ mod tests {
         let repo = PgRelayRepository::new(pool);
         let event = make_event("0xhash4", 1, 2, 100);
 
-        repo.insert_relay_log(&event, None, RelayStatus::Pending).await;
+        repo.insert_relay_log(&event, None, RelayStatus::Pending)
+            .await;
         repo.update_relay_log_failed(&event.source_event_hash).await;
 
         let status = repo.get_relay_status(&event.source_event_hash).await;

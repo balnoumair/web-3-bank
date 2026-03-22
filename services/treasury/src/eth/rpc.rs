@@ -110,13 +110,7 @@ pub async fn fetch_nonce(
         "params": [addr_hex, "pending"],
         "id": 1
     });
-    let resp: serde_json::Value = http
-        .post(rpc_url)
-        .json(&body)
-        .send()
-        .await?
-        .json()
-        .await?;
+    let resp: serde_json::Value = http.post(rpc_url).json(&body).send().await?.json().await?;
     let hex = resp["result"]
         .as_str()
         .ok_or(TxError::MissingField { field: "nonce" })?;
@@ -130,18 +124,11 @@ pub async fn fetch_gas_params(
     let body = serde_json::json!({
         "jsonrpc": "2.0", "method": "eth_gasPrice", "params": [], "id": 1
     });
-    let resp: serde_json::Value = http
-        .post(rpc_url)
-        .json(&body)
-        .send()
-        .await?
-        .json()
-        .await?;
+    let resp: serde_json::Value = http.post(rpc_url).json(&body).send().await?.json().await?;
     let hex = resp["result"]
         .as_str()
         .ok_or(TxError::MissingField { field: "gasPrice" })?;
-    let gp =
-        u64::from_str_radix(hex.trim_start_matches("0x"), 16).map_err(TxError::HexParse)?;
+    let gp = u64::from_str_radix(hex.trim_start_matches("0x"), 16).map_err(TxError::HexParse)?;
     let tip = gp / 10;
     Ok((gp + tip, tip)) // (maxFeePerGas, maxPriorityFeePerGas)
 }
@@ -157,22 +144,14 @@ pub async fn send_raw_transaction(
         "params": [raw_hex],
         "id": 1
     });
-    let resp: serde_json::Value = http
-        .post(rpc_url)
-        .json(&body)
-        .send()
-        .await?
-        .json()
-        .await?;
+    let resp: serde_json::Value = http.post(rpc_url).json(&body).send().await?.json().await?;
     if let Some(err) = resp.get("error") {
         return Err(TxError::Rpc(format!("eth_sendRawTransaction: {err}")));
     }
     resp["result"]
         .as_str()
         .map(|s| s.to_string())
-        .ok_or(TxError::MissingField {
-            field: "tx hash",
-        })
+        .ok_or(TxError::MissingField { field: "tx hash" })
 }
 
 /// Wait for a transaction receipt, returning `Ok(())` on success (status 0x1).
@@ -195,13 +174,7 @@ pub async fn wait_for_receipt(
                 tx_hash: tx_hash.to_string(),
             });
         }
-        let resp: serde_json::Value = http
-            .post(rpc_url)
-            .json(&body)
-            .send()
-            .await?
-            .json()
-            .await?;
+        let resp: serde_json::Value = http.post(rpc_url).json(&body).send().await?.json().await?;
         if let Some(receipt) = resp["result"].as_object() {
             match receipt.get("status").and_then(|s| s.as_str()) {
                 Some("0x1") => return Ok(()),
@@ -237,13 +210,7 @@ pub async fn wait_for_receipt_logs(
                 tx_hash: tx_hash.to_string(),
             });
         }
-        let resp: serde_json::Value = http
-            .post(rpc_url)
-            .json(&body)
-            .send()
-            .await?
-            .json()
-            .await?;
+        let resp: serde_json::Value = http.post(rpc_url).json(&body).send().await?.json().await?;
         if let Some(receipt) = resp["result"].as_object() {
             match receipt.get("status").and_then(|s| s.as_str()) {
                 Some("0x1") => {
@@ -333,7 +300,11 @@ mod tests {
             .await;
         let http = reqwest::Client::new();
         let selector = [0x00u8; 4];
-        assert!(fetch_pool_depth(&http, &server.uri(), "0xBankContract", &selector).await.is_none());
+        assert!(
+            fetch_pool_depth(&http, &server.uri(), "0xBankContract", &selector)
+                .await
+                .is_none()
+        );
     }
 
     #[tokio::test]

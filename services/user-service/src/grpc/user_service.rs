@@ -34,9 +34,9 @@ fn domain_err_to_status(e: DomainError) -> Status {
         DomainError::AlreadyExists => {
             Status::already_exists("address or credential already registered")
         }
-        DomainError::InvalidTempoAddress => Status::invalid_argument(
-            "tempo_address must be a 0x-prefixed 40-char hex string",
-        ),
+        DomainError::InvalidTempoAddress => {
+            Status::invalid_argument("tempo_address must be a 0x-prefixed 40-char hex string")
+        }
         DomainError::Infrastructure(msg) => Status::internal(msg),
     }
 }
@@ -91,8 +91,8 @@ impl UserService for UserServiceImpl {
     ) -> Result<Response<GetUserByAddressResponse>, Status> {
         let req = request.into_inner();
 
-        let addr = TempoAddress::try_from(req.tempo_address.as_str())
-            .map_err(domain_err_to_status)?;
+        let addr =
+            TempoAddress::try_from(req.tempo_address.as_str()).map_err(domain_err_to_status)?;
 
         let row = self
             .credential_repo
@@ -155,7 +155,11 @@ impl UserService for UserServiceImpl {
 
         // Route through the aggregate root — enforces address validation.
         let credential = user
-            .add_credential(req.credential_id.clone(), req.public_key.clone(), req.tempo_address.clone())
+            .add_credential(
+                req.credential_id.clone(),
+                req.public_key.clone(),
+                req.tempo_address.clone(),
+            )
             .map_err(domain_err_to_status)?;
 
         self.credential_repo

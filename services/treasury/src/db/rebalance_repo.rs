@@ -24,18 +24,19 @@ impl PgRebalanceRepository {
 #[async_trait]
 impl RebalanceRepository for PgRebalanceRepository {
     async fn op_in_flight(&self, source_chain: ChainId, dest_chain: ChainId) -> bool {
-        sqlx::query(
-            "SELECT 1 FROM treasury.rebalance_ops \
-             WHERE source_chain_id = $1 \
-               AND dest_chain_id   = $2 \
-               AND status IN ('pending', 'submitted') \
-               AND created_at > NOW() - INTERVAL '24 hours'",
+        sqlx::query_scalar!(
+            "SELECT EXISTS(\
+               SELECT 1 FROM treasury.rebalance_ops \
+               WHERE source_chain_id = $1 \
+                 AND dest_chain_id   = $2 \
+                 AND status IN ('pending', 'submitted') \
+                 AND created_at > NOW() - INTERVAL '24 hours'\
+             )",
+            source_chain.0 as i64,
+            dest_chain.0 as i64,
         )
-        .bind(source_chain.0 as i64)
-        .bind(dest_chain.0 as i64)
-        .fetch_optional(&self.pool)
+        .fetch_one(&self.pool)
         .await
-        .map(|r| r.is_some())
         .unwrap_or(false)
     }
 
@@ -47,18 +48,18 @@ impl RebalanceRepository for PgRebalanceRepository {
         amount: &U256,
     ) {
         let amount_str = amount.to_string();
-        if let Err(e) = sqlx::query(
+        if let Err(e) = sqlx::query_unchecked!(
             r#"
             INSERT INTO treasury.rebalance_ops
                 (op_id, source_chain_id, dest_chain_id, amount_wei, status)
             VALUES ($1, $2, $3, $4::NUMERIC, 'pending')
             ON CONFLICT (op_id) DO NOTHING
             "#,
+            op_id.as_str(),
+            source_chain.0 as i64,
+            dest_chain.0 as i64,
+            &amount_str,
         )
-        .bind(op_id.as_str())
-        .bind(source_chain.0 as i64)
-        .bind(dest_chain.0 as i64)
-        .bind(&amount_str)
         .execute(&self.pool)
         .await
         {
@@ -72,15 +73,15 @@ impl RebalanceRepository for PgRebalanceRepository {
         tx_hash: &TxHash,
         ccip_message_id: Option<&str>,
     ) {
-        if let Err(e) = sqlx::query(
+        if let Err(e) = sqlx::query!(
             "UPDATE treasury.rebalance_ops \
              SET status = 'submitted', source_tx_hash = $1, \
                  ccip_message_id = $2, updated_at = NOW() \
              WHERE op_id = $3",
+            tx_hash.as_str(),
+            ccip_message_id,
+            op_id.as_str(),
         )
-        .bind(tx_hash.as_str())
-        .bind(ccip_message_id)
-        .bind(op_id.as_str())
         .execute(&self.pool)
         .await
         {
@@ -89,12 +90,12 @@ impl RebalanceRepository for PgRebalanceRepository {
     }
 
     async fn update_rebalance_op_failed(&self, op_id: &OperationId) {
-        if let Err(e) = sqlx::query(
+        if let Err(e) = sqlx::query!(
             "UPDATE treasury.rebalance_ops \
              SET status = 'failed', updated_at = NOW() \
              WHERE op_id = $1",
+            op_id.as_str(),
         )
-        .bind(op_id.as_str())
         .execute(&self.pool)
         .await
         {
@@ -142,8 +143,10 @@ mod tests {
         let op_id = OperationId("chain3-chain4-002".to_string());
         let tx = TxHash("0xcciptx".to_string());
 
-        repo.insert_rebalance_op(&op_id, ChainId(3), ChainId(4), &U256::from(100u64)).await;
-        repo.update_rebalance_op_submitted(&op_id, &tx, Some("0xmsgid")).await;
+        repo.insert_rebalance_op(&op_id, ChainId(3), ChainId(4), &U256::from(100u64))
+            .await;
+        repo.update_rebalance_op_submitted(&op_id, &tx, Some("0xmsgid"))
+            .await;
         // op is still "in flight" after submitted (within 24h window)
         assert!(repo.op_in_flight(ChainId(3), ChainId(4)).await);
     }
@@ -153,7 +156,8 @@ mod tests {
         let repo = PgRebalanceRepository::new(pool);
         let op_id = OperationId("chain5-chain6-003".to_string());
 
-        repo.insert_rebalance_op(&op_id, ChainId(5), ChainId(6), &U256::from(200u64)).await;
+        repo.insert_rebalance_op(&op_id, ChainId(5), ChainId(6), &U256::from(200u64))
+            .await;
         assert!(repo.op_in_flight(ChainId(5), ChainId(6)).await);
         repo.update_rebalance_op_failed(&op_id).await;
         // failed ops are NOT in_flight

@@ -16,7 +16,9 @@ use crate::domain::errors::DomainError;
 pub struct TempoAddress(pub String);
 
 impl TempoAddress {
-    pub fn as_str(&self) -> &str { &self.0 }
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
 }
 
 impl std::fmt::Display for TempoAddress {
@@ -27,20 +29,30 @@ impl std::fmt::Display for TempoAddress {
 
 impl std::ops::Deref for TempoAddress {
     type Target = str;
-    fn deref(&self) -> &str { &self.0 }
+    fn deref(&self) -> &str {
+        &self.0
+    }
 }
 
 impl TryFrom<String> for TempoAddress {
     type Error = DomainError;
     fn try_from(s: String) -> Result<Self, Self::Error> {
-        if valid_tempo_address(&s) { Ok(TempoAddress(s)) } else { Err(DomainError::InvalidTempoAddress) }
+        if valid_tempo_address(&s) {
+            Ok(TempoAddress(s))
+        } else {
+            Err(DomainError::InvalidTempoAddress)
+        }
     }
 }
 
 impl TryFrom<&str> for TempoAddress {
     type Error = DomainError;
     fn try_from(s: &str) -> Result<Self, Self::Error> {
-        if valid_tempo_address(s) { Ok(TempoAddress(s.to_string())) } else { Err(DomainError::InvalidTempoAddress) }
+        if valid_tempo_address(s) {
+            Ok(TempoAddress(s.to_string()))
+        } else {
+            Err(DomainError::InvalidTempoAddress)
+        }
     }
 }
 

@@ -112,11 +112,7 @@ impl CredentialRepository for PgCredentialRepository {
         Ok(row.map(UserWithCredential::from))
     }
 
-    async fn list(
-        &self,
-        user_id: Uuid,
-        active_only: bool,
-    ) -> Result<Vec<Credential>, DomainError> {
+    async fn list(&self, user_id: Uuid, active_only: bool) -> Result<Vec<Credential>, DomainError> {
         let rows = if active_only {
             sqlx::query_as!(
                 CredentialRow,
@@ -191,7 +187,9 @@ mod tests {
     use crate::domain::repository::UserRepository;
     use crate::domain::validation::TempoAddress;
 
-    fn addr(s: &str) -> TempoAddress { TempoAddress::try_from(s).unwrap() }
+    fn addr(s: &str) -> TempoAddress {
+        TempoAddress::try_from(s).unwrap()
+    }
 
     #[sqlx::test(migrations = "src/db/migrations")]
     async fn test_insert_and_get_by_address(pool: PgPool) {
@@ -200,7 +198,12 @@ mod tests {
 
         let user_id = user_repo.insert(Some("Alice")).await.unwrap();
         cred_repo
-            .insert(user_id, b"cred-bytes", b"pk-bytes", &addr("0xabcdef1234567890abcdef1234567890abcdef12"))
+            .insert(
+                user_id,
+                b"cred-bytes",
+                b"pk-bytes",
+                &addr("0xabcdef1234567890abcdef1234567890abcdef12"),
+            )
             .await
             .unwrap();
 
@@ -230,8 +233,14 @@ mod tests {
 
         let user_id = user_repo.insert(None).await.unwrap();
         let a = addr("0xabcdef1234567890abcdef1234567890abcdef12");
-        cred_repo.insert(user_id, b"cred-1", b"pk", &a).await.unwrap();
-        let err = cred_repo.insert(user_id, b"cred-2", b"pk", &a).await.unwrap_err();
+        cred_repo
+            .insert(user_id, b"cred-1", b"pk", &a)
+            .await
+            .unwrap();
+        let err = cred_repo
+            .insert(user_id, b"cred-2", b"pk", &a)
+            .await
+            .unwrap_err();
         assert!(matches!(err, DomainError::AlreadyExists));
     }
 
@@ -241,8 +250,24 @@ mod tests {
         let cred_repo = PgCredentialRepository::new(pool);
 
         let user_id = user_repo.insert(None).await.unwrap();
-        cred_repo.insert(user_id, b"cred1", b"pk1", &addr("0xaaaa111111111111111111111111111111111111")).await.unwrap();
-        cred_repo.insert(user_id, b"cred2", b"pk2", &addr("0xbbbb222222222222222222222222222222222222")).await.unwrap();
+        cred_repo
+            .insert(
+                user_id,
+                b"cred1",
+                b"pk1",
+                &addr("0xaaaa111111111111111111111111111111111111"),
+            )
+            .await
+            .unwrap();
+        cred_repo
+            .insert(
+                user_id,
+                b"cred2",
+                b"pk2",
+                &addr("0xbbbb222222222222222222222222222222222222"),
+            )
+            .await
+            .unwrap();
 
         cred_repo.revoke(user_id, b"cred1").await.unwrap();
 
@@ -261,7 +286,12 @@ mod tests {
 
         let user_id = user_repo.insert(None).await.unwrap();
         cred_repo
-            .insert(user_id, b"only-cred", b"pk", &addr("0xcccc333333333333333333333333333333333333"))
+            .insert(
+                user_id,
+                b"only-cred",
+                b"pk",
+                &addr("0xcccc333333333333333333333333333333333333"),
+            )
             .await
             .unwrap();
 
@@ -275,10 +305,29 @@ mod tests {
         let cred_repo = PgCredentialRepository::new(pool);
 
         let user_id = user_repo.insert(None).await.unwrap();
-        cred_repo.insert(user_id, b"cred1", b"pk1", &addr("0xaaaa111111111111111111111111111111111111")).await.unwrap();
-        cred_repo.insert(user_id, b"cred2", b"pk2", &addr("0xbbbb222222222222222222222222222222222222")).await.unwrap();
+        cred_repo
+            .insert(
+                user_id,
+                b"cred1",
+                b"pk1",
+                &addr("0xaaaa111111111111111111111111111111111111"),
+            )
+            .await
+            .unwrap();
+        cred_repo
+            .insert(
+                user_id,
+                b"cred2",
+                b"pk2",
+                &addr("0xbbbb222222222222222222222222222222222222"),
+            )
+            .await
+            .unwrap();
 
         let result = cred_repo.revoke(user_id, b"nonexistent").await;
-        assert!(matches!(result.unwrap_err(), DomainError::CredentialNotFound));
+        assert!(matches!(
+            result.unwrap_err(),
+            DomainError::CredentialNotFound
+        ));
     }
 }

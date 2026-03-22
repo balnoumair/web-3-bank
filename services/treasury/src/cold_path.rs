@@ -82,7 +82,11 @@ pub struct ColdPath {
 impl ColdPath {
     /// Construct a `ColdPath` and return it wrapped in an `Arc`.
     /// Call [`spawn_background`] on the result to start background tasks.
-    pub fn new(rebalance_repo: Arc<dyn RebalanceRepository>, config: Arc<Config>, http: reqwest::Client) -> Arc<Self> {
+    pub fn new(
+        rebalance_repo: Arc<dyn RebalanceRepository>,
+        config: Arc<Config>,
+        http: reqwest::Client,
+    ) -> Arc<Self> {
         let (relayer_key, relayer_address) = eth::load_signing_key(&config.relayer_key_path);
 
         let initial: HashSet<ChainId> = config.rpc_urls.keys().map(|&k| ChainId(k)).collect();
@@ -198,7 +202,8 @@ impl ColdPath {
 
             for log in &logs {
                 if let Some(chains) = eth::decode_active_chains_from_event(&log.data) {
-                    let chains_converted: HashSet<ChainId> = chains.into_iter().map(ChainId).collect();
+                    let chains_converted: HashSet<ChainId> =
+                        chains.into_iter().map(ChainId).collect();
                     info!(
                         chains = ?chains_converted,
                         "cold_path: activation state updated from RouteReceiver"
@@ -352,7 +357,10 @@ impl ColdPath {
                     continue;
                 }
             };
-            let op_in_flight = self.rebalance_repo.op_in_flight(source_chain, dest_chain).await;
+            let op_in_flight = self
+                .rebalance_repo
+                .op_in_flight(source_chain, dest_chain)
+                .await;
 
             // Domain decision: should this operation be submitted?
             match evaluate_rebalance_op(live_depth, amount, op_in_flight) {
@@ -384,7 +392,8 @@ impl ColdPath {
                 .as_millis();
             let op_id = OperationId(format!("{}-{}-{}", source_chain, dest_chain, ts_ms));
 
-            self.rebalance_repo.insert_rebalance_op(&op_id, source_chain, dest_chain, &amount)
+            self.rebalance_repo
+                .insert_rebalance_op(&op_id, source_chain, dest_chain, &amount)
                 .await;
 
             match self
@@ -408,7 +417,8 @@ impl ColdPath {
                         ccip_message_id = ccip_msg_id.as_deref().unwrap_or("unknown"),
                         "cold_path: rebalance submitted"
                     );
-                    self.rebalance_repo.update_rebalance_op_submitted(&op_id, &tx_hash, ccip_msg_id.as_deref())
+                    self.rebalance_repo
+                        .update_rebalance_op_submitted(&op_id, &tx_hash, ccip_msg_id.as_deref())
                         .await;
                 }
                 Err(e) => {
@@ -430,10 +440,7 @@ impl ColdPath {
         dest_chain: ChainId,
         amount: &U256,
     ) -> Result<(TxHash, Option<String>), TxError> {
-        let key = self
-            .relayer_key
-            .as_ref()
-            .ok_or(TxError::MissingKey)?;
+        let key = self.relayer_key.as_ref().ok_or(TxError::MissingKey)?;
 
         let mut delay = Duration::from_secs(1);
 
@@ -454,7 +461,9 @@ impl ColdPath {
             }
         }
 
-        Err(TxError::RetryExhausted { attempts: MAX_RETRIES })
+        Err(TxError::RetryExhausted {
+            attempts: MAX_RETRIES,
+        })
     }
 
     async fn submit_rebalance_once(
@@ -466,9 +475,7 @@ impl ColdPath {
         amount: &U256,
         key: &SigningKey,
     ) -> Result<(TxHash, Option<String>), TxError> {
-        let relayer_addr = self
-            .relayer_address
-            .ok_or(TxError::MissingKey)?;
+        let relayer_addr = self.relayer_address.ok_or(TxError::MissingKey)?;
 
         let nonce = self.get_nonce(rpc_url, chain_id, &relayer_addr).await?;
         let (max_fee, max_priority_fee) = eth::fetch_gas_params(&self.http, rpc_url).await?;
@@ -523,7 +530,6 @@ impl ColdPath {
         }
         eth::fetch_nonce(&self.http, rpc_url, addr).await
     }
-
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
