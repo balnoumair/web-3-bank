@@ -37,3 +37,51 @@ Wire all services together on testnet and validate the complete user journey: re
 - All 8 test scenarios pass on testnet
 - No service crashes during the full flow
 - Deployment is reproducible from documentation
+
+---
+
+## Progress
+
+### Contract Deployment
+
+| Step | Script | Chain | Status |
+|---|---|---|---|
+| 1 | DeploySyncUSD | Arbitrum Sepolia | ✅ Done |
+| 2 | DeployBank | Arbitrum Sepolia | ✅ Done |
+| 3 | AssignRoles | Arbitrum Sepolia | ✅ Done |
+| 4 | DeploySyncUSD | Base Sepolia | ⏳ Waiting for testnet ETH |
+| 5 | DeployBank | Base Sepolia | ⏳ |
+| 6 | AssignRoles | Base Sepolia | ⏳ |
+| 7 | DeploySyncUSD | Tempo Moderato | ✅ Done |
+| 8 | DeployBank | Tempo Moderato | ✅ Done |
+| 9 | AssignRoles | Tempo Moderato | ✅ Done |
+
+Deployed addresses are tracked in `deployments.md` at the repo root.
+
+### Services
+
+| Step | Task | Status |
+|---|---|---|
+| 10 | Fill treasury `.env` with deployed contract addresses | ⏳ |
+| 11 | Complete `docker-compose.yml` (add BFF + treasury) | ⏳ |
+| 12 | Run all services locally against testnet | ⏳ |
+| 13 | Run frontend pointed at BFF | ⏳ |
+
+### Test Scenarios
+
+| # | Scenario | Status |
+|---|---|---|
+| 1 | Registration via passkey | ⏳ |
+| 2 | Deposit USDC → mint SyncUSD | ⏳ |
+| 3 | Same-chain transfer | ⏳ |
+| 4 | Cross-chain transfer (hot path) | ⏳ |
+| 5 | Watcher verification | ⏳ |
+| 6 | Pool depletion | ⏳ |
+| 7 | Cold path rebalance | ⏳ |
+| 8 | Pause/failover | ⏳ |
+
+## Known Limitations & Decisions
+
+- **SyncUSD on Tempo is ERC-20, not TIP-20:** TIP-20 (Tempo's native token standard with USD gas, payment lanes, etc.) was deferred. The UUPS proxy allows upgrading to TIP-20 later without changing the contract address. See `architecture/smart-contracts.md`.
+- **Tempo deployment requires Tempo Foundry fork:** Standard Foundry does not support Tempo's USD gas system. Install with `foundryup -n tempo` and use `~/.foundry/bin/forge` with the `--tempo.fee-token` flag.
+- **Testnet faucets:** Base/Arbitrum Sepolia ETH can be obtained via Alchemy or by bridging from Ethereum Sepolia. Tempo Moderato gas (PathUSD) is obtained via `cast rpc tempo_fundAddress <address> --rpc-url https://rpc.moderato.tempo.xyz`.

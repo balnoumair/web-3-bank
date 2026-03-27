@@ -14,11 +14,13 @@ remappings = [
 [rpc_endpoints]
 base_sepolia      = "${BASE_SEPOLIA_RPC_URL}"
 arbitrum_sepolia  = "${ARBITRUM_SEPOLIA_RPC_URL}"
+tempo_moderato    = "${TEMPO_RPC_URL}"
 local             = "${LOCAL_RPC_URL}"
 
 # ── Etherscan / block-explorer API keys for --verify ─────────────────────────
 [etherscan]
 base_sepolia     = { key = "${BASESCAN_API_KEY}", url = "https://api-sepolia.basescan.org/api" }
 arbitrum_sepolia = { key = "${ARBISCAN_API_KEY}",  url = "https://api-sepolia.arbiscan.io/api" }
+tempo_moderato   = { key = "none", url = "https://explore.moderato.tempo.xyz/api" }
 
 # See https://book.getfoundry.sh/reference/config/ for more options.
