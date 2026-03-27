@@ -40,6 +40,9 @@ yarn-error.log*
 .DS_Store
 *.pem
 
+# Signing key files (contain private keys — never commit)
+*.key
+
 # CRE build artifacts
 .cre_build_tmp.js
 

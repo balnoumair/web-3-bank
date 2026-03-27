@@ -7,8 +7,9 @@
 `SyncUSD` is a multi-chain, 1:1 backed stablecoin designed for native cross-chain settlement via Chainlink CCIP's Burn-and-Mint mechanism.
 
 ### Implementation per Chain
-- **Tempo Blockchain (Primary):** Deployed as a **TIP-20** token. 
+- **Tempo Blockchain (Primary):** Intended to be deployed as a **TIP-20** token.
   - *Benefits:* Integrates natively with Tempo's payment infrastructure, meaning we get guaranteed blockspace (payment lanes), ability to pay gas in stablecoins (fee sponsorship via EIP-2718), native reconciliation memos, and TIP-403 compliance policy features out of the box.
+  - ⚠️ **Testnet status:** Currently deployed as standard ERC-20 (same as other chains). TIP-20 implementation is deferred — the contract uses UUPS upgradeable proxy so it can be upgraded to TIP-20 later without changing the proxy address.
 - **Other EVM Chains (Base, Arbitrum):** Deployed as a standard **ERC-20** token with Chainlink CCIP `BurnMintERC20` extensions.
 
 ### Core Token Functions
