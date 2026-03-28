@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE treasury.relay_logs SET status = 'failed', updated_at = now() WHERE source_event_hash = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "cbe42ecab4878c22a2b8fa5aaf628e97ccb766a8560dc722e263f2c52bbba4c6"
+}

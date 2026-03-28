@@ -18,8 +18,9 @@ use crate::domain::validation::TempoAddress;
 use crate::grpc::{
     user_service_server::UserService, AddCredentialRequest, AddCredentialResponse,
     CreateUserRequest, CreateUserResponse, Credential, GetUserByAddressRequest,
-    GetUserByAddressResponse, ListCredentialsRequest, ListCredentialsResponse,
-    RevokeCredentialRequest, RevokeCredentialResponse, UpdateUserRequest, UpdateUserResponse,
+    GetUserByAddressResponse, GetUserByCredentialIdRequest, GetUserByCredentialIdResponse,
+    ListCredentialsRequest, ListCredentialsResponse, RevokeCredentialRequest,
+    RevokeCredentialResponse, UpdateUserRequest, UpdateUserResponse,
 };
 
 fn domain_err_to_status(e: DomainError) -> Status {
@@ -102,6 +103,27 @@ impl UserService for UserServiceImpl {
             .ok_or_else(|| Status::not_found("user not found for given tempo_address"))?;
 
         Ok(Response::new(GetUserByAddressResponse {
+            user_id: row.user_id.to_string(),
+            display_name: row.display_name,
+            status: row.status.to_string(),
+            tempo_address: row.tempo_address.to_string(),
+        }))
+    }
+
+    async fn get_user_by_credential_id(
+        &self,
+        request: Request<GetUserByCredentialIdRequest>,
+    ) -> Result<Response<GetUserByCredentialIdResponse>, Status> {
+        let req = request.into_inner();
+
+        let row = self
+            .credential_repo
+            .get_user_by_credential_id(&req.credential_id)
+            .await
+            .map_err(domain_err_to_status)?
+            .ok_or_else(|| Status::not_found("user not found for given credential_id"))?;
+
+        Ok(Response::new(GetUserByCredentialIdResponse {
             user_id: row.user_id.to_string(),
             display_name: row.display_name,
             status: row.status.to_string(),

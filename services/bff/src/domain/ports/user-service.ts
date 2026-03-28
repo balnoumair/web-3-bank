@@ -23,5 +23,6 @@ export type AddCredentialInput = {
 export interface IUserService {
   createUser(input: CreateUserInput): Promise<{ userId: string }>;
   getUserByAddress(tempoAddress: string): Promise<UserRecord>;
+  getUserByCredentialId(credentialId: Buffer): Promise<UserRecord>;
   addCredential(input: AddCredentialInput): Promise<{ credentialId: string }>;
 }

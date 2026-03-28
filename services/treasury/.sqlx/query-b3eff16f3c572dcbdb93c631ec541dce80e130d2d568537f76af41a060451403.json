@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO treasury.watcher_alerts (source_event_hash, alert_type, detail)\n            VALUES ($1, $2, $3)\n            ON CONFLICT (source_event_hash) DO NOTHING\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "b3eff16f3c572dcbdb93c631ec541dce80e130d2d568537f76af41a060451403"
+}

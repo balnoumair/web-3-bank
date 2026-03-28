@@ -24,8 +24,10 @@
 
 | Contract | Address |
 |---|---|
-| SyncUSD Proxy | ⏳ pending |
-| Bank Proxy | ⏳ pending |
+| SyncUSD Implementation | `0x5B0f07eF75fB07100566227fec0fdE04BC84BF3d` |
+| SyncUSD Proxy | `0xDf6Be8ccC12608BD54da744C0741f320aaae14ca` |
+| Bank Implementation | `0x609d3485174E6A835A8D3806435D0E252aBAaed9` |
+| Bank Proxy | `0xFb1e90da938A653621D9dA3d5773C906738BD7F1` |
 | USDC | `0x036CbD53842c5426634e7929541eC2318f3dCF7e` |
 
 ## Admin Wallet

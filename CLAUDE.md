@@ -19,6 +19,11 @@ This is a **learning-oriented project**. The developer is not a web3 expert and 
 - Do not assume Rust programing language knowledge
 - Do assume familiarity with: general software development, running terminal commands, editing files, git.
 
+### Security
+
+- **NEVER read or edit `.env` files.** They contain private keys and secrets. Only reference `.env.example` templates.
+- When env changes are needed, tell the user what to set — do not read or modify the file directly.
+
 ### Tone
 
 - Instructive but not condescending.

@@ -40,16 +40,18 @@ export function makeMutationUseCases(userService: IUserService) {
     },
 
     authenticate: async (args: {
-      address: string;
       credentialId: string;
     }): Promise<AuthPayload> => {
-      // Frontend has already verified the WebAuthn challenge. BFF confirms
-      // the user exists, then issues a JWT.
-      const { userId } = await userService.getUserByAddress(args.address);
+      // Look up the user by their WebAuthn credential ID (the passkey
+      // assertion doesn't return the public key, so we can't derive the
+      // address client-side during login).
+      const credentialIdBuf = base64urlToBuffer(args.credentialId);
+      const { userId, tempoAddress } =
+        await userService.getUserByCredentialId(credentialIdBuf);
 
       const token = issueJwt({
         userId,
-        address: args.address,
+        address: tempoAddress,
         credentialId: args.credentialId,
       });
 

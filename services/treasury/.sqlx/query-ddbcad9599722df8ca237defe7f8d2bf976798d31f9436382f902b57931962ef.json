@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE treasury.rebalance_ops SET status = 'submitted', source_tx_hash = $1, ccip_message_id = $2, updated_at = NOW() WHERE op_id = $3",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "ddbcad9599722df8ca237defe7f8d2bf976798d31f9436382f902b57931962ef"
+}

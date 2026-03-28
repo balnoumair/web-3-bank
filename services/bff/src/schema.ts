@@ -64,6 +64,6 @@ export const typeDefs = /* GraphQL */ `
     The frontend must have already verified the passkey challenge before calling this.
     Returns a JWT session token.
     """
-    authenticate(address: String!, credentialId: String!): AuthPayload!
+    authenticate(credentialId: String!): AuthPayload!
   }
 `;

@@ -30,6 +30,7 @@ impl WatcherRepository for PgWatcherRepository {
         )
         .fetch_one(&self.pool)
         .await
+        .unwrap_or(Some(false))
         .unwrap_or(false)
     }
 

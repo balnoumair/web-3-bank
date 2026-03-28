@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO treasury.pool_snapshots (chain_id, depth_wei) VALUES ($1, $2::NUMERIC)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Numeric"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "f3b769258c5da787f77336798126f21efd3e4050fe203c2266f7be094364da7b"
+}

@@ -37,7 +37,7 @@ export function makeMutationResolvers(mutations: MutationUseCases) {
 
     authenticate: async (
       _: unknown,
-      args: { address: string; credentialId: string }
+      args: { credentialId: string }
     ) => {
       return mutations.authenticate(args);
     },
