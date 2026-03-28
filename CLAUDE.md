@@ -2,7 +2,7 @@
 
 ## Working Style
 
-This is a **learning-oriented project**. The developer is not a web3 expert and wants to understand what is being done and why at every step — not just see code produced.
+This is a **learning-oriented project**. The developer is not a web3 expert and wants to understand what is being done and why at every step — not just see code produced. Is not familiar also with Rust programing language
 
 ### How to explain things
 
@@ -16,10 +16,10 @@ This is a **learning-oriented project**. The developer is not a web3 expert and 
 ### Assumptions
 
 - Do not assume familiarity with: private keys vs public addresses, testnets vs mainnet, gas tokens, contract proxies, RPC URLs, chain IDs, or any other web3 primitive.
+- Do not assume Rust programing language knowledge
 - Do assume familiarity with: general software development, running terminal commands, editing files, git.
 
 ### Tone
 
 - Instructive but not condescending.
-- Celebrate progress on meaningful milestones (first contract deployed, first chain fully wired, etc.).
 - Keep responses concise — explain concepts inline, don't write essays.
