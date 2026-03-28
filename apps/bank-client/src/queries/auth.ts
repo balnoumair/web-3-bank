@@ -49,8 +49,8 @@ export interface RegisterUserResponse {
 }
 
 export const AUTHENTICATE_MUTATION = `
-  mutation Authenticate($address: String!, $credentialId: String!) {
-    authenticate(address: $address, credentialId: $credentialId) {
+  mutation Authenticate($credentialId: String!) {
+    authenticate(credentialId: $credentialId) {
       token
       userId
     }

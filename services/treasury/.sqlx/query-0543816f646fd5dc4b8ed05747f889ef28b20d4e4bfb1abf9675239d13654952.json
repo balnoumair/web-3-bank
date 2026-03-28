@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE treasury.relay_logs SET dest_tx_hash = $1, status = $2, updated_at = now() WHERE source_event_hash = $3",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "0543816f646fd5dc4b8ed05747f889ef28b20d4e4bfb1abf9675239d13654952"
+}

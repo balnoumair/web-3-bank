@@ -60,6 +60,18 @@ export class GrpcUserServiceAdapter implements IUserService {
     });
   }
 
+  getUserByCredentialId(credentialId: Buffer): Promise<UserRecord> {
+    return new Promise((resolve, reject) => {
+      this.client.getUserByCredentialId(
+        { credentialId },
+        (err: grpc.ServiceError | null, res: UserRecord) => {
+          if (err) reject(grpcToError(err));
+          else resolve(res);
+        }
+      );
+    });
+  }
+
   addCredential(req: AddCredentialInput): Promise<{ credentialId: string }> {
     return new Promise((resolve, reject) => {
       this.client.addCredential(

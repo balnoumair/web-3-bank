@@ -1,5 +1,5 @@
 # Build context must be repo root (needs packages/proto/ for build.rs)
-ARG RUST_VERSION=1.77.0
+ARG RUST_VERSION=1.85.0
 FROM rust:${RUST_VERSION} AS builder
 WORKDIR /app
 

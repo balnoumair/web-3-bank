@@ -71,7 +71,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // ── 3. Construct repository adapters + modules ─────────────────────────────
-    let relay_repo = Arc::new(db::PgRelayRepository::new(pool.clone()));
+    let relay_repo: Arc<dyn crate::domain::repository::RelayRepository> =
+        Arc::new(db::PgRelayRepository::new(pool.clone()));
     let rebalance_repo = Arc::new(db::PgRebalanceRepository::new(pool.clone()));
     let watcher_repo = Arc::new(db::PgWatcherRepository::new(pool.clone()));
     let snapshot_repo = Arc::new(db::PgPoolSnapshotRepository::new(pool.clone()));

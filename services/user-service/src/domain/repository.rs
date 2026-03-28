@@ -39,6 +39,12 @@ pub trait CredentialRepository: Send + Sync {
         tempo_address: &TempoAddress,
     ) -> Result<Option<UserWithCredential>, DomainError>;
 
+    /// Look up a user by their WebAuthn credential ID (raw bytes).
+    async fn get_user_by_credential_id(
+        &self,
+        credential_id: &[u8],
+    ) -> Result<Option<UserWithCredential>, DomainError>;
+
     /// List credentials for a user. When `active_only` is true, excludes
     /// revoked credentials.
     async fn list(&self, user_id: Uuid, active_only: bool) -> Result<Vec<Credential>, DomainError>;

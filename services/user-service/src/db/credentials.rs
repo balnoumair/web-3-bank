@@ -112,6 +112,24 @@ impl CredentialRepository for PgCredentialRepository {
         Ok(row.map(UserWithCredential::from))
     }
 
+    async fn get_user_by_credential_id(
+        &self,
+        credential_id: &[u8],
+    ) -> Result<Option<UserWithCredential>, DomainError> {
+        let row = sqlx::query_as!(
+            UserWithCredentialRow,
+            "SELECT u.id AS user_id, u.display_name, u.status, u.created_at, c.tempo_address
+         FROM users.credentials c
+         JOIN users.users u ON u.id = c.user_id
+         WHERE c.credential_id = $1 AND c.revoked_at IS NULL",
+            credential_id,
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(sqlx_to_domain)?;
+        Ok(row.map(UserWithCredential::from))
+    }
+
     async fn list(&self, user_id: Uuid, active_only: bool) -> Result<Vec<Credential>, DomainError> {
         let rows = if active_only {
             sqlx::query_as!(

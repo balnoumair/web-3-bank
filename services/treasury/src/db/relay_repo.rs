@@ -33,6 +33,7 @@ impl RelayRepository for PgRelayRepository {
         )
         .fetch_one(&self.pool)
         .await
+        .unwrap_or(Some(false))
         .unwrap_or(false)
     }
 

@@ -4,6 +4,7 @@ package user;
 service UserService {
   rpc CreateUser(CreateUserRequest) returns (CreateUserResponse);
   rpc GetUserByAddress(GetUserByAddressRequest) returns (GetUserByAddressResponse);
+  rpc GetUserByCredentialId(GetUserByCredentialIdRequest) returns (GetUserByCredentialIdResponse);
   rpc ListCredentials(ListCredentialsRequest) returns (ListCredentialsResponse);
   rpc AddCredential(AddCredentialRequest) returns (AddCredentialResponse);
   rpc UpdateUser(UpdateUserRequest) returns (UpdateUserResponse);
@@ -22,6 +23,15 @@ message CreateUserResponse { string user_id = 1; }
 
 message GetUserByAddressRequest { string tempo_address = 1; }
 message GetUserByAddressResponse {
+  string user_id       = 1;
+  string display_name  = 2;
+  string status        = 3;
+  string tempo_address = 4;
+}
+
+// credential_id is raw bytes — BFF must base64url-decode before sending.
+message GetUserByCredentialIdRequest { bytes credential_id = 1; }
+message GetUserByCredentialIdResponse {
   string user_id       = 1;
   string display_name  = 2;
   string status        = 3;

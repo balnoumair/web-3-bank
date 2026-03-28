@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT depth_wei::TEXT AS \"depth_wei!\" FROM treasury.pool_snapshots\n               WHERE chain_id = $1\n               ORDER BY recorded_at DESC\n               LIMIT 1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "depth_wei!",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "999d3fd8bbf718066d7382f76c1902f1dab6cdd164deb5f13582e403fe7ca851"
+}

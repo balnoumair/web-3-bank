@@ -37,6 +37,7 @@ impl RebalanceRepository for PgRebalanceRepository {
         )
         .fetch_one(&self.pool)
         .await
+        .unwrap_or(Some(false))
         .unwrap_or(false)
     }
 

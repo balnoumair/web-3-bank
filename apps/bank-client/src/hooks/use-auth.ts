@@ -77,12 +77,8 @@ export function createAuth() {
       // 1. Get existing passkey (triggers biometric)
       const assertion = await getPasskeyCredential();
 
-      // 2. We need the address — for login, the BFF looks up the user by credentialId.
-      // The address field is required by the schema but the credential ID is the
-      // primary lookup key. We send a placeholder that the BFF can resolve.
-      // In practice, the BFF should look up the address from the credential.
+      // 2. Authenticate — the BFF looks up the user by credentialId
       const data = await gql<AuthenticateResponse>(AUTHENTICATE_MUTATION, {
-        address: '0x0', // BFF resolves from credentialId
         credentialId: assertion.credentialId,
       });
 
