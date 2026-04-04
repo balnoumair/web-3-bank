@@ -7,18 +7,34 @@
     --font-Inter: ui-Inter, system-ui, Inter, sans-serif;
     --font-display: 'Satoshi', ui-sans-serif, system-ui, sans-serif;
 
-    --color-white: #fff;
-    --color-black: #000;
-    --color-brown: #1F1F1F;
-    --color-warm: #D1CFBF;
-    --color-hue: #F76F53;
-    --color-lichen: #2E6F40;
-    --color-lush: #CFFFDC;
-    --color-tropic: #253D2C;
-    --color-success: #68BA7F;
-    --color-error: #fc3c3c;
-    --color-disabled: #f8f7f7;
-    --color-info: #0b63a2;
+    /* Background scale */
+    --color-bg: #09090B;
+    --color-surface: #111114;
+    --color-raised: #1A1A1F;
+    --color-overlay: #222228;
+
+    /* Borders */
+    --color-edge: #27272A;
+
+    /* Text scale */
+    --color-text: #F4F4F5;
+    --color-muted: #A1A1AA;
+    --color-subtle: #52525B;
+    --color-faint: #3F3F46;
+
+    /* Accent — electric teal */
+    --color-accent: #2DD4BF;
+    --color-accent-hover: #14B8A6;
+    --color-accent-dim: #0D9488;
+
+    /* Semantic */
+    --color-success: #34D399;
+    --color-error: #FB7185;
+    --color-info: #60A5FA;
+
+    /* Base */
+    --color-white: #F4F4F5;
+    --color-black: #09090B;
 
     --font-tall: 60px;
     --font-xxxxl: 50px;

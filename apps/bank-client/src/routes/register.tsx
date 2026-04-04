@@ -25,29 +25,32 @@ export default function Register() {
   };
 
   return (
-    <main class="min-h-screen bg-[#141414] flex items-center justify-center p-4">
+    <main class="min-h-screen bg-bg flex items-center justify-center p-4 relative overflow-hidden">
       <Title>Create Account - Web3Bank</Title>
 
-      <div class="w-full max-w-sm animate-in">
+      {/* Ambient glow */}
+      <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-accent/[0.04] rounded-full blur-[120px] pointer-events-none" />
+
+      <div class="w-full max-w-sm animate-in relative">
         {/* Logo */}
         <div class="text-center mb-10">
-          <div class="inline-flex items-center justify-center w-14 h-14 bg-hue rounded-2xl mb-5">
-            <span class="text-white font-bold text-xl font-[Satoshi]">W3</span>
+          <div class="inline-flex items-center justify-center w-14 h-14 bg-accent/10 rounded-2xl mb-5 ring-1 ring-accent/20">
+            <span class="text-accent font-bold text-xl font-[Satoshi]">W3</span>
           </div>
-          <h1 class="text-3xl font-bold text-white font-[Satoshi] tracking-tight">
+          <h1 class="text-3xl font-bold text-text font-[Satoshi] tracking-tight">
             Web3Bank
           </h1>
-          <p class="text-warm/50 text-sm mt-2">
+          <p class="text-muted text-sm mt-2">
             Stablecoin banking, simplified.
           </p>
         </div>
 
         {/* Card */}
-        <div class="bg-[#1a1a1a] border border-warm/8 rounded-2xl p-8">
-          <h2 class="text-xl font-bold text-white font-[Satoshi] mb-1">
+        <div class="bg-surface border border-edge rounded-2xl p-8">
+          <h2 class="text-xl font-bold text-text font-[Satoshi] mb-1">
             Create Account
           </h2>
-          <p class="text-warm/50 text-sm mb-8">
+          <p class="text-muted text-sm mb-8">
             Set up your account with passkey authentication.
           </p>
 
@@ -62,7 +65,7 @@ export default function Register() {
             <div class="mb-6">
               <label
                 for="displayName"
-                class="block text-sm font-medium text-warm/70 mb-2"
+                class="block text-sm font-medium text-muted mb-2"
               >
                 Display Name
               </label>
@@ -72,11 +75,11 @@ export default function Register() {
                 value={displayName()}
                 onInput={(e) => setDisplayName(e.currentTarget.value)}
                 placeholder="Your name"
-                class="w-full bg-brown border border-warm/10 rounded-xl px-4 py-3 text-white placeholder-warm/20 focus:outline-none focus:border-hue/50 focus:ring-1 focus:ring-hue/20 transition-all"
+                class="w-full bg-raised border border-edge rounded-xl px-4 py-3 text-text placeholder-subtle focus:outline-none focus:border-accent/50 focus:ring-1 focus:ring-accent/20 transition-all"
                 disabled={isSubmitting()}
                 required
               />
-              <p class="text-warm/30 text-xs mt-1.5">
+              <p class="text-subtle text-xs mt-1.5">
                 This is how you'll appear in the app.
               </p>
             </div>
@@ -84,7 +87,7 @@ export default function Register() {
             <button
               type="submit"
               disabled={isSubmitting() || !displayName()}
-              class="w-full bg-hue hover:bg-hue/90 active:scale-[0.98] text-white font-semibold py-3.5 px-4 rounded-xl transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2.5"
+              class="w-full bg-accent hover:bg-accent-hover active:scale-[0.98] text-accent-fg font-semibold py-3.5 px-4 rounded-xl transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2.5"
             >
               <Show
                 when={!isSubmitting()}
@@ -105,15 +108,15 @@ export default function Register() {
             </button>
           </form>
 
-          {/* Info */}
-          <div class="mt-6 p-4 bg-tropic/20 border border-lichen/20 rounded-xl">
-            <h3 class="text-sm font-medium text-lush mb-1.5 flex items-center gap-2">
+          {/* Info box */}
+          <div class="mt-6 p-4 bg-accent/5 border border-accent/10 rounded-xl">
+            <h3 class="text-sm font-medium text-accent mb-1.5 flex items-center gap-2">
               <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
               </svg>
               What is a passkey?
             </h3>
-            <p class="text-warm/50 text-xs leading-relaxed">
+            <p class="text-muted text-xs leading-relaxed">
               A passkey uses your device's biometrics (Face ID, Touch ID) to create a secure
               cryptographic key. No passwords, no seed phrases.
             </p>
@@ -121,11 +124,11 @@ export default function Register() {
 
           {/* Login link */}
           <div class="mt-6 text-center">
-            <p class="text-warm/40 text-sm">
+            <p class="text-subtle text-sm">
               Already have an account?{" "}
               <a
                 href="/login"
-                class="text-hue hover:text-hue/80 font-medium transition-colors"
+                class="text-accent hover:text-accent-hover font-medium transition-colors"
               >
                 Sign in
               </a>
@@ -133,7 +136,7 @@ export default function Register() {
           </div>
         </div>
 
-        <p class="text-warm/30 text-xs text-center mt-6">
+        <p class="text-subtle text-xs text-center mt-6">
           Your passkey is stored on your device and synced via your platform's keychain.
         </p>
       </div>

@@ -1,4 +1,4 @@
-import { createSignal, For, onCleanup, type Component } from 'solid-js';
+import { createSignal, For, type Component } from 'solid-js';
 
 export interface ToastItem {
   id: string;
@@ -52,21 +52,22 @@ const ToastContainer: Component = () => {
       <For each={toasts()}>
         {(toast) => (
           <div
-            class={`pointer-events-auto bg-brown border border-warm/10 ${borderColor[toast.type]} border-l-4 rounded-lg px-4 py-3 shadow-2xl min-w-[320px] max-w-[420px] flex items-start gap-3`}
+            class={`pointer-events-auto bg-surface border border-edge ${borderColor[toast.type]} border-l-4 rounded-lg px-4 py-3 min-w-[320px] max-w-[420px] flex items-start gap-3`}
+            style={{ "box-shadow": "var(--shadow-float)" }}
             style={{ animation: 'slideIn 0.3s ease-out' }}
           >
             <div class="flex-shrink-0 mt-0.5">{iconMap[toast.type]}</div>
             <div class="flex-1 min-w-0">
-              <p class="text-sm text-white font-medium">{toast.message}</p>
+              <p class="text-sm text-text font-medium">{toast.message}</p>
               {toast.txHash && (
-                <p class="text-xs text-warm/60 mt-1 truncate">
+                <p class="text-xs text-subtle mt-1 truncate">
                   Tx: {toast.txHash}
                 </p>
               )}
             </div>
             <button
               onClick={() => dismissToast(toast.id)}
-              class="flex-shrink-0 text-warm/40 hover:text-warm transition-colors"
+              class="flex-shrink-0 text-subtle hover:text-muted transition-colors"
             >
               <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />

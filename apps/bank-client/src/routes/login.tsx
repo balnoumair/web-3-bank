@@ -21,29 +21,32 @@ export default function Login() {
   };
 
   return (
-    <main class="min-h-screen bg-[#141414] flex items-center justify-center p-4">
+    <main class="min-h-screen bg-bg flex items-center justify-center p-4 relative overflow-hidden">
       <Title>Sign In - Web3Bank</Title>
 
-      <div class="w-full max-w-sm animate-in">
+      {/* Ambient glow */}
+      <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-accent/[0.04] rounded-full blur-[120px] pointer-events-none" />
+
+      <div class="w-full max-w-sm animate-in relative">
         {/* Logo */}
         <div class="text-center mb-10">
-          <div class="inline-flex items-center justify-center w-14 h-14 bg-hue rounded-2xl mb-5">
-            <span class="text-white font-bold text-xl font-[Satoshi]">W3</span>
+          <div class="inline-flex items-center justify-center w-14 h-14 bg-accent/10 rounded-2xl mb-5 ring-1 ring-accent/20">
+            <span class="text-accent font-bold text-xl font-[Satoshi]">W3</span>
           </div>
-          <h1 class="text-3xl font-bold text-white font-[Satoshi] tracking-tight">
+          <h1 class="text-3xl font-bold text-text font-[Satoshi] tracking-tight">
             Web3Bank
           </h1>
-          <p class="text-warm/50 text-sm mt-2">
+          <p class="text-muted text-sm mt-2">
             Stablecoin banking, simplified.
           </p>
         </div>
 
         {/* Card */}
-        <div class="bg-[#1a1a1a] border border-warm/8 rounded-2xl p-8">
-          <h2 class="text-xl font-bold text-white font-[Satoshi] mb-1">
+        <div class="bg-surface border border-edge rounded-2xl p-8">
+          <h2 class="text-xl font-bold text-text font-[Satoshi] mb-1">
             Welcome back
           </h2>
-          <p class="text-warm/50 text-sm mb-8">
+          <p class="text-muted text-sm mb-8">
             Sign in with your passkey to continue.
           </p>
 
@@ -58,7 +61,7 @@ export default function Login() {
           <button
             onClick={handlePasskeyLogin}
             disabled={isSubmitting()}
-            class="w-full bg-hue hover:bg-hue/90 active:scale-[0.98] text-white font-semibold py-3.5 px-4 rounded-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2.5"
+            class="w-full bg-accent hover:bg-accent-hover active:scale-[0.98] text-accent-fg font-semibold py-3.5 px-4 rounded-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2.5"
           >
             <Show
               when={!isSubmitting()}
@@ -80,11 +83,11 @@ export default function Login() {
 
           {/* Register link */}
           <div class="mt-6 text-center">
-            <p class="text-warm/40 text-sm">
+            <p class="text-subtle text-sm">
               Don't have an account?{" "}
               <a
                 href="/register"
-                class="text-hue hover:text-hue/80 font-medium transition-colors"
+                class="text-accent hover:text-accent-hover font-medium transition-colors"
               >
                 Create one
               </a>
@@ -93,7 +96,7 @@ export default function Login() {
         </div>
 
         {/* Security note */}
-        <p class="text-warm/30 text-xs text-center mt-6">
+        <p class="text-subtle text-xs text-center mt-6">
           Secured with device passkeys. Your biometric data never leaves your device.
         </p>
       </div>

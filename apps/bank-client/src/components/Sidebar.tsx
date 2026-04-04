@@ -6,14 +6,14 @@ const Sidebar: Component = () => {
   const isActive = (path: string) => location.pathname === path;
 
   return (
-    <div class="fixed left-0 top-0 h-screen w-52 bg-[#161616] border-r border-warm/5 flex flex-col">
+    <div class="fixed left-0 top-0 h-screen w-52 bg-surface border-r border-edge/50 flex flex-col">
       {/* Logo */}
-      <div class="p-5 border-b border-warm/5">
+      <div class="p-5 border-b border-edge/50">
         <div class="flex items-center gap-3">
-          <div class="w-8 h-8 bg-hue rounded-lg flex items-center justify-center text-white font-bold text-sm">
+          <div class="w-8 h-8 bg-accent/15 rounded-lg flex items-center justify-center text-accent font-bold text-sm ring-1 ring-accent/20">
             W3
           </div>
-          <span class="text-white font-bold text-lg font-[Satoshi] tracking-tight">
+          <span class="text-text font-bold text-lg font-[Satoshi] tracking-tight">
             Web3Bank
           </span>
         </div>
@@ -25,8 +25,8 @@ const Sidebar: Component = () => {
           href="/"
           class={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all ${
             isActive('/')
-              ? 'bg-lichen/20 text-lush'
-              : 'text-warm/60 hover:text-warm hover:bg-warm/5'
+              ? 'bg-accent/10 text-accent'
+              : 'text-muted hover:text-text hover:bg-raised'
           }`}
         >
           <svg class="w-[18px] h-[18px]" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">

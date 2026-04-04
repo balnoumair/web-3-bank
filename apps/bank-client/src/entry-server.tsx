@@ -12,6 +12,7 @@ export default createHandler(() => (
           {assets}
         </head>
         <body>
+          <script>{`(function(){try{var t=localStorage.getItem('w3b-theme');var r=t==='light'||(t==='system'||!t)&&window.matchMedia('(prefers-color-scheme:light)').matches;if(r)document.documentElement.classList.add('light')}catch(e){}})()`}</script>
           <div id="app">{children}</div>
           {scripts}
         </body>
