@@ -1,6 +1,8 @@
 import { createSignal, Show, type Component } from 'solid-js';
 import { parseAmount, formatUsd } from '~/lib/format';
 import { showToast } from './Toast';
+import { gql } from '~/lib/graphql';
+import { RESOLVE_USERNAME_QUERY, type ResolveUsernameResponse } from '~/queries/auth';
 
 export type TransactionType = 'deposit' | 'withdraw' | 'send';
 
@@ -47,11 +49,21 @@ const TransactionModal: Component<TransactionModalProps> = (props) => {
 
     try {
       const parsedAmount = parseAmount(amount());
-      // TODO: resolve username to address via backend
-      const txHash = await props.onSubmit({
-        amount: parsedAmount,
-        to: needsRecipient() ? (recipient() as `0x${string}`) : undefined,
-      });
+
+      let to: `0x${string}` | undefined;
+      if (needsRecipient()) {
+        const raw = recipient().trim();
+        if (raw.startsWith('0x')) {
+          to = raw as `0x${string}`;
+        } else {
+          // Strip leading @ if present, then resolve username → address.
+          const uname = raw.startsWith('@') ? raw.slice(1) : raw;
+          const data = await gql<ResolveUsernameResponse>(RESOLVE_USERNAME_QUERY, { username: uname });
+          to = data.resolveUsername.tempoAddress as `0x${string}`;
+        }
+      }
+
+      const txHash = await props.onSubmit({ amount: parsedAmount, to });
 
       showToast({
         type: 'success',

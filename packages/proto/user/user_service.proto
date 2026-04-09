@@ -9,6 +9,8 @@ service UserService {
   rpc AddCredential(AddCredentialRequest) returns (AddCredentialResponse);
   rpc UpdateUser(UpdateUserRequest) returns (UpdateUserResponse);
   rpc RevokeCredential(RevokeCredentialRequest) returns (RevokeCredentialResponse);
+  rpc SetUsername(SetUsernameRequest) returns (SetUsernameResponse);
+  rpc GetUserByUsername(GetUserByUsernameRequest) returns (GetUserByUsernameResponse);
 }
 
 // credential_id is raw bytes throughout. The BFF must base64url-decode
@@ -27,6 +29,7 @@ message GetUserByAddressResponse {
   string display_name  = 2;
   string status        = 3;
   string tempo_address = 4;
+  string username      = 5;  // empty string if not set
 }
 
 // credential_id is raw bytes — BFF must base64url-decode before sending.
@@ -36,6 +39,7 @@ message GetUserByCredentialIdResponse {
   string display_name  = 2;
   string status        = 3;
   string tempo_address = 4;
+  string username      = 5;  // empty string if not set
 }
 
 message ListCredentialsRequest {
@@ -68,6 +72,31 @@ message UpdateUserRequest {
 message UpdateUserResponse {
   string user_id      = 1;
   string display_name = 2;
+  string username     = 3;  // empty string if not set
+}
+
+// user_id injected by BFF from JWT — never from the client.
+message SetUsernameRequest {
+  string user_id  = 1;
+  string username = 2;
+}
+message SetUsernameResponse {
+  string user_id       = 1;
+  string display_name  = 2;
+  string status        = 3;
+  string tempo_address = 4;
+  string username      = 5;
+}
+
+message GetUserByUsernameRequest {
+  string username = 1;
+}
+message GetUserByUsernameResponse {
+  string user_id       = 1;
+  string display_name  = 2;
+  string status        = 3;
+  string tempo_address = 4;
+  string username      = 5;
 }
 
 message RevokeCredentialRequest {

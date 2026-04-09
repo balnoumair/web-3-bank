@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id, display_name, status, created_at, updated_at\n         FROM users.users WHERE id = $1",
+  "query": "SELECT id, display_name, username, status, created_at, updated_at\n             FROM users.users WHERE LOWER(username) = LOWER($1)",
   "describe": {
     "columns": [
       {
@@ -15,32 +15,38 @@
       },
       {
         "ordinal": 2,
-        "name": "status",
+        "name": "username",
         "type_info": "Text"
       },
       {
         "ordinal": 3,
+        "name": "status",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
         "name": "created_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 4,
+        "ordinal": 5,
         "name": "updated_at",
         "type_info": "Timestamptz"
       }
     ],
     "parameters": {
       "Left": [
-        "Uuid"
+        "Text"
       ]
     },
     "nullable": [
       false,
       false,
+      true,
       false,
       false,
       false
     ]
   },
-  "hash": "a146558c04f7f0a827a50c6b3df866e8ef736cfdb83f9d4d1bcdca3f36d35f05"
+  "hash": "65969b2cb8812b033f158f02562ab69da60253ca72c95e892fbd91214d5384e5"
 }

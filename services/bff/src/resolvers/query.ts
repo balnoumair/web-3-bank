@@ -39,5 +39,14 @@ export function makeQueryResolvers(queries: QueryUseCases) {
       const { address } = requireAuth(ctx);
       return queries.getRecentTransfers(address, args.limit ?? 20);
     },
+
+    resolveUsername: async (
+      _: unknown,
+      args: { username: string },
+      ctx: Context
+    ) => {
+      requireAuth(ctx);
+      return queries.resolveUsername(args.username);
+    },
   };
 }

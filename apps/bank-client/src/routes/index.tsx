@@ -6,6 +6,7 @@ import { useTransfers } from "~/hooks/use-transfers";
 import { useDeposit } from "~/hooks/use-deposit";
 import { useWithdraw } from "~/hooks/use-withdraw";
 import { useTransfer } from "~/hooks/use-transfer";
+import { useSetUsername } from "~/hooks/use-username";
 import { formatUsd, formatDate, truncateAddress } from "~/lib/format";
 import AnimatedNumber from "~/components/AnimatedNumber";
 import Skeleton from "~/components/Skeleton";
@@ -24,6 +25,21 @@ export default function Home() {
   const transfer = useTransfer(userAddress);
 
   const [modalType, setModalType] = createSignal<TransactionType | null>(null);
+
+  const setUsername = useSetUsername();
+  const [usernameInput, setUsernameInput] = createSignal('');
+  const [usernameError, setUsernameError] = createSignal<string | null>(null);
+
+  const handleSetUsername = async (e: Event) => {
+    e.preventDefault();
+    setUsernameError(null);
+    try {
+      await setUsername.mutateAsync(usernameInput().trim());
+      setUsernameInput('');
+    } catch (err) {
+      setUsernameError(err instanceof Error ? err.message : 'Failed to set username');
+    }
+  };
 
   const balanceNumber = () => {
     const raw = balance.data;
@@ -64,6 +80,35 @@ export default function Home() {
           Your banking overview.
         </p>
       </div>
+
+      {/* Username setup prompt */}
+      <Show when={auth.user() && !auth.user()?.username}>
+        <div class="bg-accent/[0.06] border border-accent/20 rounded-2xl p-4 mb-6">
+          <p class="text-sm font-medium text-text mb-3">
+            Set a username so others can send you funds
+          </p>
+          <form onSubmit={handleSetUsername} class="flex gap-2">
+            <input
+              type="text"
+              placeholder="e.g. alice123"
+              value={usernameInput()}
+              onInput={(e) => setUsernameInput(e.currentTarget.value)}
+              disabled={setUsername.isPending}
+              class="flex-1 bg-raised border border-edge rounded-xl px-3 py-2 text-sm text-text placeholder-faint focus:outline-none focus:border-accent/50 focus:ring-1 focus:ring-accent/20 disabled:opacity-50"
+            />
+            <button
+              type="submit"
+              disabled={!usernameInput().trim() || setUsername.isPending}
+              class="bg-accent hover:bg-accent-hover text-accent-fg text-sm font-semibold px-4 py-2 rounded-xl transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              {setUsername.isPending ? 'Saving...' : 'Save'}
+            </button>
+          </form>
+          <Show when={usernameError()}>
+            <p class="text-error text-xs mt-2">{usernameError()}</p>
+          </Show>
+        </div>
+      </Show>
 
       {/* Balance card */}
       <div class="bg-surface border border-edge rounded-2xl p-6 mb-6 relative overflow-hidden">

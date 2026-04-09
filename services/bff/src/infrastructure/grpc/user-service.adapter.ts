@@ -83,16 +83,40 @@ export class GrpcUserServiceAdapter implements IUserService {
       );
     });
   }
+
+  setUsername(userId: string, username: string): Promise<UserRecord> {
+    return new Promise((resolve, reject) => {
+      this.client.setUsername(
+        { userId, username },
+        (err: grpc.ServiceError | null, res: UserRecord) => {
+          if (err) reject(grpcToError(err));
+          else resolve(res);
+        }
+      );
+    });
+  }
+
+  getUserByUsername(username: string): Promise<UserRecord> {
+    return new Promise((resolve, reject) => {
+      this.client.getUserByUsername(
+        { username },
+        (err: grpc.ServiceError | null, res: UserRecord) => {
+          if (err) reject(grpcToError(err));
+          else resolve(res);
+        }
+      );
+    });
+  }
 }
 
 function grpcToError(err: grpc.ServiceError): Error {
+  // Use err.details for the server-set message (e.g. "username already taken").
+  // Fall back to err.message for unknown errors.
   const message =
     err.code === grpc.status.NOT_FOUND
       ? "Not found"
-      : err.code === grpc.status.ALREADY_EXISTS
-      ? "Already exists"
       : err.code === grpc.status.UNAUTHENTICATED
       ? "Unauthenticated"
-      : err.message;
+      : err.details || err.message;
   return new Error(message);
 }

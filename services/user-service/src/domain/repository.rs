@@ -8,7 +8,7 @@ use uuid::Uuid;
 
 use crate::domain::entities::{Credential, User, UserWithCredential};
 use crate::domain::errors::DomainError;
-use crate::domain::validation::TempoAddress;
+use crate::domain::validation::{TempoAddress, Username};
 
 #[async_trait]
 pub trait UserRepository: Send + Sync {
@@ -20,6 +20,13 @@ pub trait UserRepository: Send + Sync {
 
     /// Update the display name for a user.
     async fn update_display_name(&self, id: Uuid, name: &str) -> Result<(), DomainError>;
+
+    /// Set or update the username for a user (case-insensitive uniqueness enforced
+    /// at the DB level). Returns `UsernameTaken` if the username is already in use.
+    async fn set_username(&self, id: Uuid, username: &Username) -> Result<(), DomainError>;
+
+    /// Look up a user by username (case-insensitive). Returns `None` if not found.
+    async fn get_by_username(&self, username: &Username) -> Result<Option<User>, DomainError>;
 }
 
 #[async_trait]
@@ -52,4 +59,11 @@ pub trait CredentialRepository: Send + Sync {
     /// Revoke a credential. Enforces the business rule that a user must
     /// retain at least one active credential.
     async fn revoke(&self, user_id: Uuid, credential_id: &[u8]) -> Result<(), DomainError>;
+
+    /// Look up a user (with their active credential address) by username
+    /// (case-insensitive). Returns `None` if not found.
+    async fn get_user_by_username(
+        &self,
+        username: &Username,
+    ) -> Result<Option<UserWithCredential>, DomainError>;
 }
