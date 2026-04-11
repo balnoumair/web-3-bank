@@ -3,6 +3,7 @@ export type UserRecord = {
   displayName: string;
   status: string;
   tempoAddress: string;
+  username: string;  // empty string if not set
 };
 
 export type CreateUserInput = {
@@ -25,4 +26,6 @@ export interface IUserService {
   getUserByAddress(tempoAddress: string): Promise<UserRecord>;
   getUserByCredentialId(credentialId: Buffer): Promise<UserRecord>;
   addCredential(input: AddCredentialInput): Promise<{ credentialId: string }>;
+  setUsername(userId: string, username: string): Promise<UserRecord>;
+  getUserByUsername(username: string): Promise<UserRecord>;
 }

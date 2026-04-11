@@ -1,11 +1,11 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT u.id AS user_id, u.display_name, u.status, u.created_at, c.tempo_address\n         FROM users.credentials c\n         JOIN users.users u ON u.id = c.user_id\n         WHERE c.credential_id = $1 AND c.revoked_at IS NULL",
+  "query": "SELECT id, display_name, username, status, created_at, updated_at\n             FROM users.users WHERE id = $1",
   "describe": {
     "columns": [
       {
         "ordinal": 0,
-        "name": "user_id",
+        "name": "id",
         "type_info": "Uuid"
       },
       {
@@ -15,32 +15,38 @@
       },
       {
         "ordinal": 2,
-        "name": "status",
+        "name": "username",
         "type_info": "Text"
       },
       {
         "ordinal": 3,
+        "name": "status",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
         "name": "created_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 4,
-        "name": "tempo_address",
-        "type_info": "Text"
+        "ordinal": 5,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
       }
     ],
     "parameters": {
       "Left": [
-        "Bytea"
+        "Uuid"
       ]
     },
     "nullable": [
       false,
       false,
+      true,
       false,
       false,
       false
     ]
   },
-  "hash": "1309595bd5fcf4f6ca4723c09d06401d6be58feab431e544590afb9a43b40470"
+  "hash": "63cc431a9f436ba0aef8ba4ee027e207003bd5dd959213d1ae3ca3c4ee5a9245"
 }

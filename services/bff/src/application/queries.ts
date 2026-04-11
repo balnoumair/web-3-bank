@@ -1,4 +1,5 @@
 import type { IUserService, UserRecord } from "../domain/ports/user-service.js";
+
 import type {
   ITreasuryService,
   PoolDepth,
@@ -29,5 +30,8 @@ export function makeQueryUseCases(
       address: string,
       limit: number
     ): Promise<Transfer[]> => treasuryService.getRecentTransfers(address, limit),
+
+    resolveUsername: (username: string): Promise<UserRecord> =>
+      userService.getUserByUsername(username),
   };
 }

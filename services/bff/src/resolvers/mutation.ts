@@ -41,5 +41,14 @@ export function makeMutationResolvers(mutations: MutationUseCases) {
     ) => {
       return mutations.authenticate(args);
     },
+
+    setUsername: async (
+      _: unknown,
+      args: { username: string },
+      ctx: Context
+    ) => {
+      const { userId } = requireAuth(ctx);
+      return mutations.setUsername({ userId, username: args.username });
+    },
   };
 }

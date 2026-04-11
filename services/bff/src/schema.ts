@@ -5,6 +5,7 @@ export const typeDefs = /* GraphQL */ `
     displayName: String!
     status: String!
     tempoAddress: String!
+    username: String!
   }
 
   type Credential {
@@ -45,6 +46,9 @@ export const typeDefs = /* GraphQL */ `
 
     """Returns recent transfer history for the authenticated user (requires auth)"""
     recentTransfers(limit: Int): [Transfer!]!
+
+    """Resolve a username to a user profile — used when sending funds (requires auth)"""
+    resolveUsername(username: String!): User!
   }
 
   type Mutation {
@@ -65,5 +69,8 @@ export const typeDefs = /* GraphQL */ `
     Returns a JWT session token.
     """
     authenticate(credentialId: String!): AuthPayload!
+
+    """Set or update the authenticated user's username (requires auth)"""
+    setUsername(username: String!): User!
   }
 `;

@@ -3,6 +3,7 @@ export interface User {
   displayName: string;
   status: string;
   tempoAddress: string;
+  username: string;
 }
 
 export interface AuthPayload {
@@ -17,6 +18,7 @@ export const ME_QUERY = `
       displayName
       status
       tempoAddress
+      username
     }
   }
 `;
@@ -59,4 +61,34 @@ export const AUTHENTICATE_MUTATION = `
 
 export interface AuthenticateResponse {
   authenticate: AuthPayload;
+}
+
+export const SET_USERNAME_MUTATION = `
+  mutation SetUsername($username: String!) {
+    setUsername(username: $username) {
+      userId
+      displayName
+      status
+      tempoAddress
+      username
+    }
+  }
+`;
+
+export interface SetUsernameResponse {
+  setUsername: User;
+}
+
+export const RESOLVE_USERNAME_QUERY = `
+  query ResolveUsername($username: String!) {
+    resolveUsername(username: $username) {
+      userId
+      tempoAddress
+      username
+    }
+  }
+`;
+
+export interface ResolveUsernameResponse {
+  resolveUsername: User;
 }

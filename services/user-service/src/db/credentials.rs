@@ -13,7 +13,7 @@ use super::sqlx_to_domain;
 use crate::domain::entities::{Credential, UserStatus, UserWithCredential};
 use crate::domain::errors::DomainError;
 use crate::domain::repository::CredentialRepository;
-use crate::domain::validation::TempoAddress;
+use crate::domain::validation::{TempoAddress, Username};
 
 #[derive(Debug, sqlx::FromRow)]
 struct CredentialRow {
@@ -44,6 +44,7 @@ impl From<CredentialRow> for Credential {
 struct UserWithCredentialRow {
     user_id: Uuid,
     display_name: String,
+    username: Option<String>,
     status: String,
     created_at: DateTime<Utc>,
     tempo_address: String,
@@ -54,6 +55,7 @@ impl From<UserWithCredentialRow> for UserWithCredential {
         UserWithCredential {
             user_id: row.user_id,
             display_name: row.display_name,
+            username: row.username.map(Username), // DB data assumed valid
             status: row.status.parse().unwrap_or(UserStatus::Active),
             created_at: row.created_at,
             tempo_address: TempoAddress(row.tempo_address), // DB data assumed valid
@@ -100,10 +102,10 @@ impl CredentialRepository for PgCredentialRepository {
     ) -> Result<Option<UserWithCredential>, DomainError> {
         let row = sqlx::query_as!(
             UserWithCredentialRow,
-            "SELECT u.id AS user_id, u.display_name, u.status, u.created_at, c.tempo_address
-         FROM users.credentials c
-         JOIN users.users u ON u.id = c.user_id
-         WHERE c.tempo_address = $1 AND c.revoked_at IS NULL",
+            "SELECT u.id AS user_id, u.display_name, u.username, u.status, u.created_at, c.tempo_address
+             FROM users.credentials c
+             JOIN users.users u ON u.id = c.user_id
+             WHERE c.tempo_address = $1 AND c.revoked_at IS NULL",
             tempo_address.as_str(),
         )
         .fetch_optional(&self.pool)
@@ -118,11 +120,30 @@ impl CredentialRepository for PgCredentialRepository {
     ) -> Result<Option<UserWithCredential>, DomainError> {
         let row = sqlx::query_as!(
             UserWithCredentialRow,
-            "SELECT u.id AS user_id, u.display_name, u.status, u.created_at, c.tempo_address
-         FROM users.credentials c
-         JOIN users.users u ON u.id = c.user_id
-         WHERE c.credential_id = $1 AND c.revoked_at IS NULL",
+            "SELECT u.id AS user_id, u.display_name, u.username, u.status, u.created_at, c.tempo_address
+             FROM users.credentials c
+             JOIN users.users u ON u.id = c.user_id
+             WHERE c.credential_id = $1 AND c.revoked_at IS NULL",
             credential_id,
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(sqlx_to_domain)?;
+        Ok(row.map(UserWithCredential::from))
+    }
+
+    async fn get_user_by_username(
+        &self,
+        username: &Username,
+    ) -> Result<Option<UserWithCredential>, DomainError> {
+        let row = sqlx::query_as!(
+            UserWithCredentialRow,
+            "SELECT u.id AS user_id, u.display_name, u.username, u.status, u.created_at, c.tempo_address
+             FROM users.credentials c
+             JOIN users.users u ON u.id = c.user_id
+             WHERE LOWER(u.username) = LOWER($1) AND c.revoked_at IS NULL
+             LIMIT 1",
+            username.as_str(),
         )
         .fetch_optional(&self.pool)
         .await
@@ -209,7 +230,7 @@ mod tests {
         TempoAddress::try_from(s).unwrap()
     }
 
-    #[sqlx::test(migrations = "src/db/migrations")]
+    #[sqlx::test]
     async fn test_insert_and_get_by_address(pool: PgPool) {
         let user_repo = PgUserRepository::new(pool.clone());
         let cred_repo = PgCredentialRepository::new(pool);
@@ -234,7 +255,7 @@ mod tests {
         assert_eq!(row.display_name, "Alice");
     }
 
-    #[sqlx::test(migrations = "src/db/migrations")]
+    #[sqlx::test]
     async fn test_get_user_by_address_not_found(pool: PgPool) {
         let cred_repo = PgCredentialRepository::new(pool);
         let result = cred_repo
@@ -244,7 +265,7 @@ mod tests {
         assert!(result.is_none());
     }
 
-    #[sqlx::test(migrations = "src/db/migrations")]
+    #[sqlx::test]
     async fn test_duplicate_address_rejected(pool: PgPool) {
         let user_repo = PgUserRepository::new(pool.clone());
         let cred_repo = PgCredentialRepository::new(pool);
@@ -262,7 +283,7 @@ mod tests {
         assert!(matches!(err, DomainError::AlreadyExists));
     }
 
-    #[sqlx::test(migrations = "src/db/migrations")]
+    #[sqlx::test]
     async fn test_list_credentials_active_only(pool: PgPool) {
         let user_repo = PgUserRepository::new(pool.clone());
         let cred_repo = PgCredentialRepository::new(pool);
@@ -297,7 +318,7 @@ mod tests {
         assert_eq!(active[0].credential_id, b"cred2");
     }
 
-    #[sqlx::test(migrations = "src/db/migrations")]
+    #[sqlx::test]
     async fn test_revoke_last_credential_fails(pool: PgPool) {
         let user_repo = PgUserRepository::new(pool.clone());
         let cred_repo = PgCredentialRepository::new(pool);
@@ -317,7 +338,7 @@ mod tests {
         assert!(matches!(err, DomainError::LastActiveCredential));
     }
 
-    #[sqlx::test(migrations = "src/db/migrations")]
+    #[sqlx::test]
     async fn test_revoke_nonexistent_credential_fails(pool: PgPool) {
         let user_repo = PgUserRepository::new(pool.clone());
         let cred_repo = PgCredentialRepository::new(pool);
@@ -347,5 +368,55 @@ mod tests {
             result.unwrap_err(),
             DomainError::CredentialNotFound
         ));
+    }
+
+    #[sqlx::test]
+    async fn test_get_user_by_username(pool: PgPool) {
+        use crate::db::users::PgUserRepository;
+        use crate::domain::repository::UserRepository;
+        use crate::domain::validation::Username;
+
+        let user_repo = PgUserRepository::new(pool.clone());
+        let cred_repo = PgCredentialRepository::new(pool);
+
+        let user_id = user_repo.insert(Some("Alice")).await.unwrap();
+        user_repo
+            .set_username(user_id, &Username::try_from("alice_test").unwrap())
+            .await
+            .unwrap();
+        cred_repo
+            .insert(
+                user_id,
+                b"cred-bytes",
+                b"pk-bytes",
+                &addr("0xabcdef1234567890abcdef1234567890abcdef12"),
+            )
+            .await
+            .unwrap();
+
+        let row = cred_repo
+            .get_user_by_username(&Username::try_from("Alice_Test").unwrap())
+            .await
+            .unwrap()
+            .expect("should find user by username (case-insensitive)");
+
+        assert_eq!(row.user_id, user_id);
+        assert_eq!(row.display_name, "Alice");
+        assert_eq!(row.username.unwrap().as_str(), "alice_test");
+        assert_eq!(
+            row.tempo_address.as_str(),
+            "0xabcdef1234567890abcdef1234567890abcdef12"
+        );
+    }
+
+    #[sqlx::test]
+    async fn test_get_user_by_username_not_found(pool: PgPool) {
+        use crate::domain::validation::Username;
+        let cred_repo = PgCredentialRepository::new(pool);
+        let result = cred_repo
+            .get_user_by_username(&Username::try_from("nobody123").unwrap())
+            .await
+            .unwrap();
+        assert!(result.is_none());
     }
 }

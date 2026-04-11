@@ -1,4 +1,4 @@
-import type { IUserService } from "../domain/ports/user-service.js";
+import type { IUserService, UserRecord } from "../domain/ports/user-service.js";
 import { issueJwt } from "../jwt.js";
 
 export type AuthPayload = { token: string; userId: string };
@@ -72,6 +72,13 @@ export function makeMutationUseCases(userService: IUserService) {
       });
 
       return credentialId;
+    },
+
+    setUsername: async (args: {
+      userId: string;
+      username: string;
+    }): Promise<UserRecord> => {
+      return userService.setUsername(args.userId, args.username);
     },
   };
 }

@@ -8,7 +8,7 @@ use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
 use crate::domain::errors::DomainError;
-use crate::domain::validation::TempoAddress;
+use crate::domain::validation::{TempoAddress, Username};
 
 /// User account status.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -49,6 +49,7 @@ impl std::str::FromStr for UserStatus {
 pub struct User {
     pub id: Uuid,
     pub display_name: String,
+    pub username: Option<Username>,
     pub status: UserStatus,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
@@ -63,6 +64,7 @@ impl User {
         User {
             id,
             display_name: display_name.unwrap_or_default(),
+            username: None,
             status: UserStatus::Active,
             created_at: now,
             updated_at: now,
@@ -132,6 +134,7 @@ impl Credential {
 pub struct UserWithCredential {
     pub user_id: Uuid,
     pub display_name: String,
+    pub username: Option<Username>,
     pub status: UserStatus,
     pub created_at: DateTime<Utc>,
     pub tempo_address: TempoAddress,
