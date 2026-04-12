@@ -46,6 +46,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("connecting to database…");
     let pool = PgPoolOptions::new()
         .max_connections(10)
+        .after_connect(|conn, _meta| {
+            Box::pin(async move {
+                sqlx::query("SET search_path = treasury").execute(conn).await?;
+                Ok(())
+            })
+        })
         .connect(&cfg.database_url)
         .await?;
 

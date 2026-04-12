@@ -16,6 +16,12 @@ pub use users::PgUserRepository;
 pub async fn connect(database_url: &str) -> Result<PgPool, sqlx::Error> {
     let pool = sqlx::postgres::PgPoolOptions::new()
         .max_connections(5)
+        .after_connect(|conn, _meta| {
+            Box::pin(async move {
+                sqlx::query("SET search_path = users").execute(conn).await?;
+                Ok(())
+            })
+        })
         .connect(database_url)
         .await?;
     Ok(pool)

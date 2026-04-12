@@ -7,7 +7,7 @@ services:
       context: ..
       dockerfile: services/user-service/Dockerfile
     environment:
-      DATABASE_URL: ${DATABASE_URL}
+      DATABASE_URL: ${USER_SERVICE_DATABASE_URL}
       GRPC_ADDR: "0.0.0.0:50051"
     ports:
       - "50051:50051"
@@ -21,7 +21,7 @@ services:
     env_file:
       - treasury/.env
     environment:
-      DATABASE_URL: ${DATABASE_URL}
+      DATABASE_URL: ${TREASURY_DATABASE_URL}
       GRPC_PORT: 50052
       RELAYER_KEY_PATH: /run/secrets/relayer.key
     ports:

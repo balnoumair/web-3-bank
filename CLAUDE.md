@@ -24,6 +24,15 @@ This is a **learning-oriented project**. The developer is not a web3 expert and 
 - **NEVER read or edit `.env` files.** They contain private keys and secrets. Only reference `.env.example` templates.
 - When env changes are needed, tell the user what to set — do not read or modify the file directly.
 
+### Architecture
+
+- **Database isolation:** each service owns its own PostgreSQL schema and must never query another service's schema.
+  - `user-service` → `users.*` only
+  - `treasury` → `treasury.*` only
+  - No cross-schema joins or queries, ever. If data from another service is needed, go through its gRPC API.
+  - `search_path` is enforced in code via `after_connect` in each service's pool setup.
+  - Role-based enforcement (DB-level permissions) is a TODO — currently blocked by Supabase pooler not supporting custom roles.
+
 ### Tone
 
 - Instructive but not condescending.
