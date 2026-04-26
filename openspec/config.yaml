@@ -1,13 +1,27 @@
 schema: spec-driven
 
-# Project context (optional)
-# This is shown to AI when creating artifacts.
-# Add your tech stack, conventions, style guides, domain knowledge, etc.
-# Example:
-#   context: |
-#     Tech stack: TypeScript, React, Node.js
-#     We use conventional commits
-#     Domain: e-commerce platform
+context: |
+  # web3Bank
+
+  Chain-abstracted, non-custodial banking ledger. Users hold balances as a custom stablecoin (SyncUSD) backed 1:1 by USDC. The system manages distribution and routing across multiple chains transparently — users see a single USD balance.
+
+  ## Architecture paradigms
+  - **Domain-Driven Design:** business logic (Bank Ledger, CRE chain scoring, Treasury rebalancing) is strictly isolated from infrastructure (APIs, RPCs).
+  - **Functional Programming:** pure functions, immutability, no shared mutable state — especially for financial transactions and concurrent cross-chain routing.
+
+  ## Tech stack
+  - **Frontend** (`apps/bank-client`): SolidJS + SolidStart, `@wagmi/solid` + `viem` for blockchain state and EIP-2718 passkey payloads, `@tanstack/solid-query` for caching.
+  - **BFF** (`services/bff`): Bun + TypeScript. GraphQL toward the frontend. Thin proxy — no DB, no business logic.
+  - **User Service** (`services/user-service`): Rust. gRPC (tonic, port 50051). Owns `users.*` schema in PostgreSQL.
+  - **Treasury Service** (`services/treasury`): Rust. Hot path relay, cold path CCIP rebalancing, watcher, pool management. Owns `treasury.*` schema. Uses `sqlx`, `alloy`, `tokio`.
+  - **CRE Route Orchestrator** (`apps/cre-workflows`, `apps/cre-runtime`, `packages/cre-config`): TypeScript on Bun. Built on `@chainlink/cre-sdk`. Publishes chain health to `RouteReceiver.sol`.
+  - **Smart Contracts** (`packages/onchain`): Solidity 0.8.24+, Foundry toolchain, OpenZeppelin (AccessControl, UUPSUpgradeable, Pausable, ERC20), Chainlink CCIP (BurnMintERC20).
+  - **Database:** PostgreSQL. Each service owns its own schema; cross-schema queries are forbidden. `search_path` enforced via `after_connect` in pool setup.
+
+  ## Conventions
+  - Conventional commits.
+  - Capabilities are domain-grouped (auth, user-identity, banking-ledger, cross-chain-routing, chain-health-orchestration, service-architecture), not per-service.
+  - Specs reflect **decided behavior only**. WIP, deferred, or "we might" items do not belong in canonical specs — propose them as a change first.
 
 # Per-artifact rules (optional)
 # Add custom rules for specific artifacts.
