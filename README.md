@@ -103,12 +103,17 @@ web3Bank/
 │   ├── ui/                   # Shared UI component library
 │   ├── eslint-config/        # Shared ESLint configuration
 │   └── tailwind-config/      # Shared Tailwind v4 configuration
-├── architecture/             # Decision records & service architecture
-│   ├── authentication.md     # Passkey auth (decided)
-│   ├── technology.md         # Tech stack
-│   ├── smart-contracts.md    # SyncUSD, Bank Contract, RouteReceiver
-│   ├── bank-infrastructure.md # Hot/cold path, pool model
-│   └── services.md           # Service boundaries & integration
+├── openspec/                 # Authoritative specifications
+│   ├── config.yaml           # Project context (tech stack, conventions)
+│   └── specs/                # One spec per capability
+│       ├── auth/                          # Passkey auth & signing
+│       ├── user-identity/                 # Profile & credential mapping
+│       ├── banking-ledger/                # SyncUSD, deposit, withdraw
+│       ├── cross-chain-routing/           # Hot path, cold path, watcher
+│       ├── chain-health-orchestration/    # CRE scoring & RouteReceiver
+│       └── service-architecture/          # Service boundaries & contract patterns
+├── docs/
+│   └── user-journey.md       # End-to-end narrative walkthrough
 ├── tasks/                    # Implementation task breakdowns
 └── [future]
     ├── contracts/            # Solidity: SyncUSD, Bank Contract (Foundry)
@@ -122,7 +127,7 @@ web3Bank/
 
 ## Open Items (Deferred)
 
-> Decision records live in `architecture/`. These items are tracked but not blocking testnet.
+> Authoritative specs live in `openspec/specs/`. The items below are tracked but not yet decided — they will become OpenSpec change proposals when worked on, not direct spec edits.
 
 - [ ] Account recovery strategy (social recovery, backup passkeys, time-delayed)
 - [ ] Revenue/fee model (spread, transfer fees, yield on reserves)

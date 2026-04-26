@@ -82,6 +82,6 @@ Deployed addresses are tracked in `deployments.md` at the repo root.
 
 ## Known Limitations & Decisions
 
-- **SyncUSD on Tempo is ERC-20, not TIP-20:** TIP-20 (Tempo's native token standard with USD gas, payment lanes, etc.) was deferred. The UUPS proxy allows upgrading to TIP-20 later without changing the contract address. See `architecture/smart-contracts.md`.
+- **SyncUSD on Tempo is ERC-20, not TIP-20:** TIP-20 (Tempo's native token standard with USD gas, payment lanes, etc.) was deferred. The UUPS proxy allows upgrading to TIP-20 later without changing the contract address. The TIP-20 migration will be proposed as an OpenSpec change against `openspec/specs/banking-ledger/`.
 - **Tempo deployment requires Tempo Foundry fork:** Standard Foundry does not support Tempo's USD gas system. Install with `foundryup -n tempo` and use `~/.foundry/bin/forge` with the `--tempo.fee-token` flag.
 - **Testnet faucets:** Base/Arbitrum Sepolia ETH can be obtained via Alchemy or by bridging from Ethereum Sepolia. Tempo Moderato gas (PathUSD) is obtained via `cast rpc tempo_fundAddress <address> --rpc-url https://rpc.moderato.tempo.xyz`.
