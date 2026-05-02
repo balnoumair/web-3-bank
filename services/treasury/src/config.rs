@@ -39,8 +39,9 @@ pub struct Config {
     pub watcher_rpc_urls: Option<JsonMap<u64, String>>,
 
     // ── Cold-path rebalancing ─────────────────────────────────────────────────
-    /// Minimum pool ratio in basis points (0–10 000) for any chain below which
-    /// rebalancing is triggered.  For example `2000` = 20 %.  Default: 2000.
+    /// Minimum ratio to target depth in basis points (0–10 000) for any chain
+    /// below which rebalancing is triggered.  For example `8000` = 80 % of
+    /// target.  Default: 8000.
     #[serde(default = "default_cold_path_min_bps")]
     pub cold_path_min_bps: u32,
 
@@ -63,6 +64,11 @@ pub struct Config {
     /// Default: 60.
     #[serde(default = "default_cold_path_poll_secs")]
     pub cold_path_poll_secs: u64,
+
+    /// Seconds before an in-flight CCIP rebalance requires manual review.
+    /// Default: 1800 (30 minutes).
+    #[serde(default = "default_cold_path_stuck_message_timeout_secs")]
+    pub cold_path_stuck_message_timeout_secs: u64,
 }
 
 fn default_grpc_port() -> u16 {
@@ -70,11 +76,15 @@ fn default_grpc_port() -> u16 {
 }
 
 fn default_cold_path_min_bps() -> u32 {
-    2000 // 20 %
+    8000 // 80 % of target
 }
 
 fn default_cold_path_poll_secs() -> u64 {
     60
+}
+
+fn default_cold_path_stuck_message_timeout_secs() -> u64 {
+    1_800
 }
 
 impl Config {

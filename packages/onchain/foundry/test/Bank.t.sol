@@ -75,6 +75,7 @@ contract BankTest is Test {
     address public recipient = address(0xA5);
     address public unauthorized = address(0xA6);
     address public feeCollector = address(0xA7);
+    address public rebalancer = address(0xA8);
 
     // ── Contracts ──────────────────────────────────────────────────────
 
@@ -86,6 +87,7 @@ contract BankTest is Test {
 
     bytes32 public MINTER_ROLE;
     bytes32 public RELAYER_ROLE;
+    bytes32 public REBALANCER_ROLE;
     bytes32 public PAUSER_ROLE;
     bytes32 public ADMIN_ROLE;
 
@@ -105,6 +107,12 @@ contract BankTest is Test {
     event FeeCollectorUpdated(address indexed feeCollector);
     event TokenAllowed(address indexed token);
     event TokenDisallowed(address indexed token);
+    event RebalanceInitiated(bytes32 indexed messageId, uint64 indexed destChainId, uint256 amount);
+    event RebalanceCompleted(bytes32 indexed messageId, uint64 indexed sourceChainId, uint256 amount);
+    event MaxRebalanceAmountUpdated(uint256 amount);
+    event AllowlistedDestChainUpdated(uint64 indexed destChainId, bool allowed);
+    event AllowlistedSourceContractUpdated(uint64 indexed sourceChainId, address indexed sourceContract, bool allowed);
+    event CcipRouterUpdated(address indexed router);
 
     // ── Setup ──────────────────────────────────────────────────────────
 
@@ -117,8 +125,7 @@ contract BankTest is Test {
 
         // Deploy Bank proxy
         Bank bankImpl = new Bank();
-        bytes memory bankInit =
-            abi.encodeCall(Bank.initialize, (admin, pauser, address(syncUSD), feeCollector));
+        bytes memory bankInit = abi.encodeCall(Bank.initialize, (admin, pauser, address(syncUSD), feeCollector));
         ERC1967Proxy bankProxy = new ERC1967Proxy(address(bankImpl), bankInit);
         bank = Bank(address(bankProxy));
 
@@ -131,6 +138,10 @@ contract BankTest is Test {
         RELAYER_ROLE = bank.RELAYER_ROLE();
         vm.prank(admin);
         bank.grantRole(RELAYER_ROLE, relayer);
+
+        REBALANCER_ROLE = bank.REBALANCER_ROLE();
+        vm.prank(admin);
+        bank.grantRole(REBALANCER_ROLE, rebalancer);
 
         PAUSER_ROLE = bank.PAUSER_ROLE();
         ADMIN_ROLE = bank.ADMIN_ROLE();
@@ -170,6 +181,11 @@ contract BankTest is Test {
         assertTrue(bank.hasRole(RELAYER_ROLE, relayer));
     }
 
+    function test_rebalancerHasRebalancerRole() public view {
+        assertTrue(bank.hasRole(REBALANCER_ROLE, rebalancer));
+        assertTrue(REBALANCER_ROLE != RELAYER_ROLE);
+    }
+
     function test_notPausedAfterInit() public view {
         assertFalse(bank.paused());
     }
@@ -181,24 +197,21 @@ contract BankTest is Test {
 
     function test_initializeRevertsOnZeroAdmin() public {
         Bank impl = new Bank();
-        bytes memory data =
-            abi.encodeCall(Bank.initialize, (address(0), pauser, address(syncUSD), feeCollector));
+        bytes memory data = abi.encodeCall(Bank.initialize, (address(0), pauser, address(syncUSD), feeCollector));
         vm.expectRevert(Bank.ZeroAddress.selector);
         new ERC1967Proxy(address(impl), data);
     }
 
     function test_initializeRevertsOnZeroPauser() public {
         Bank impl = new Bank();
-        bytes memory data =
-            abi.encodeCall(Bank.initialize, (admin, address(0), address(syncUSD), feeCollector));
+        bytes memory data = abi.encodeCall(Bank.initialize, (admin, address(0), address(syncUSD), feeCollector));
         vm.expectRevert(Bank.ZeroAddress.selector);
         new ERC1967Proxy(address(impl), data);
     }
 
     function test_initializeRevertsOnZeroSyncUSD() public {
         Bank impl = new Bank();
-        bytes memory data =
-            abi.encodeCall(Bank.initialize, (admin, pauser, address(0), feeCollector));
+        bytes memory data = abi.encodeCall(Bank.initialize, (admin, pauser, address(0), feeCollector));
         vm.expectRevert(Bank.ZeroAddress.selector);
         new ERC1967Proxy(address(impl), data);
     }
@@ -269,9 +282,7 @@ contract BankTest is Test {
         token18.mint(user, 100e18);
         vm.startPrank(user);
         token18.approve(address(bank), 100e18);
-        vm.expectRevert(
-            abi.encodeWithSelector(Bank.InvalidTokenDecimals.selector, address(token18), uint8(18))
-        );
+        vm.expectRevert(abi.encodeWithSelector(Bank.InvalidTokenDecimals.selector, address(token18), uint8(18)));
         bank.deposit(address(token18), 100e18);
         vm.stopPrank();
     }
@@ -526,6 +537,13 @@ contract BankTest is Test {
         assertFalse(bank.hasRole(RELAYER_ROLE, relayer));
     }
 
+    function test_adminCanGrantRebalancerRole() public {
+        address newRebalancer = address(0xBC);
+        vm.prank(admin);
+        bank.grantRole(REBALANCER_ROLE, newRebalancer);
+        assertTrue(bank.hasRole(REBALANCER_ROLE, newRebalancer));
+    }
+
     function test_nonAdminCannotGrantRoles() public {
         vm.prank(unauthorized);
         vm.expectRevert();
@@ -660,6 +678,21 @@ contract BankTest is Test {
         bank.releaseHotPath(recipient, amount, bytes32(0));
     }
 
+    function test_rebalanceRevertsWhenPaused() public {
+        _fundPool(100e6);
+        vm.prank(admin);
+        bank.setMaxRebalanceAmount(100e6);
+        vm.prank(admin);
+        bank.setAllowlistedDestChain(42, true);
+
+        vm.prank(pauser);
+        bank.pause();
+
+        vm.prank(rebalancer);
+        vm.expectRevert();
+        bank.rebalance(42, 100e6);
+    }
+
     function test_depositWorksAfterUnpause() public {
         vm.prank(pauser);
         bank.pause();
@@ -695,6 +728,168 @@ contract BankTest is Test {
         vm.prank(unauthorized);
         vm.expectRevert();
         bank.setFeeCollector(address(0xFEE));
+    }
+
+    // ── Cold path rebalance ─────────────────────────────────────────────
+
+    function _fundPool(uint256 amount) internal {
+        _giveUserSyncUSD(amount);
+        vm.startPrank(user);
+        syncUSD.approve(address(bank), amount);
+        bank.transferHotPath(recipient, amount, 42);
+        vm.stopPrank();
+    }
+
+    function test_adminCanConfigureRebalanceCapAndAllowlists() public {
+        vm.expectEmit(false, false, false, true);
+        emit MaxRebalanceAmountUpdated(500e6);
+        vm.prank(admin);
+        bank.setMaxRebalanceAmount(500e6);
+        assertEq(bank.maxRebalanceAmount(), 500e6);
+
+        vm.expectEmit(true, false, false, true);
+        emit AllowlistedDestChainUpdated(42, true);
+        vm.prank(admin);
+        bank.setAllowlistedDestChain(42, true);
+        assertTrue(bank.allowlistedDestChains(42));
+
+        vm.expectEmit(true, true, false, true);
+        emit AllowlistedSourceContractUpdated(99, address(bank), true);
+        vm.prank(admin);
+        bank.setAllowlistedSourceContract(99, address(bank), true);
+        assertTrue(bank.allowlistedSourceContracts(99, address(bank)));
+
+        vm.expectEmit(true, false, false, false);
+        emit CcipRouterUpdated(address(this));
+        vm.prank(admin);
+        bank.setCcipRouter(address(this));
+        assertEq(bank.ccipRouter(), address(this));
+    }
+
+    function test_nonAdminCannotConfigureRebalance() public {
+        vm.prank(unauthorized);
+        vm.expectRevert();
+        bank.setMaxRebalanceAmount(500e6);
+
+        vm.prank(unauthorized);
+        vm.expectRevert();
+        bank.setAllowlistedDestChain(42, true);
+
+        vm.prank(unauthorized);
+        vm.expectRevert();
+        bank.setAllowlistedSourceContract(99, address(bank), true);
+
+        vm.prank(unauthorized);
+        vm.expectRevert();
+        bank.setCcipRouter(address(this));
+    }
+
+    function test_rebalanceBurnsPoolAndEmitsMessageId() public {
+        uint256 amount = 100e6;
+        _fundPool(amount);
+        vm.prank(admin);
+        bank.setMaxRebalanceAmount(amount);
+        vm.prank(admin);
+        bank.setAllowlistedDestChain(42, true);
+
+        bytes32 expectedMessageId = keccak256(abi.encode(block.chainid, address(bank), uint64(42), amount, uint256(0)));
+        vm.expectEmit(true, true, false, true);
+        emit RebalanceInitiated(expectedMessageId, 42, amount);
+
+        vm.prank(rebalancer);
+        bytes32 messageId = bank.rebalance(42, amount);
+
+        assertEq(messageId, expectedMessageId);
+        assertEq(syncUSD.balanceOf(address(bank)), 0);
+        assertEq(bank.poolDepth(), 0);
+    }
+
+    function test_rebalanceRevertsForNonRebalancer() public {
+        _fundPool(100e6);
+        vm.prank(admin);
+        bank.setMaxRebalanceAmount(100e6);
+        vm.prank(admin);
+        bank.setAllowlistedDestChain(42, true);
+
+        vm.prank(unauthorized);
+        vm.expectRevert();
+        bank.rebalance(42, 100e6);
+    }
+
+    function test_rebalanceRevertsWhenAmountExceedsCap() public {
+        _fundPool(200e6);
+        vm.prank(admin);
+        bank.setMaxRebalanceAmount(100e6);
+        vm.prank(admin);
+        bank.setAllowlistedDestChain(42, true);
+
+        vm.prank(rebalancer);
+        vm.expectRevert(abi.encodeWithSelector(Bank.RebalanceCapExceeded.selector, 200e6, 100e6));
+        bank.rebalance(42, 200e6);
+        assertEq(bank.poolDepth(), 200e6);
+    }
+
+    function test_rebalanceRevertsWhenDestNotAllowlisted() public {
+        _fundPool(100e6);
+        vm.prank(admin);
+        bank.setMaxRebalanceAmount(100e6);
+
+        vm.prank(rebalancer);
+        vm.expectRevert(abi.encodeWithSelector(Bank.DestChainNotAllowlisted.selector, uint64(42)));
+        bank.rebalance(42, 100e6);
+    }
+
+    function test_rebalanceRevertsWhenPoolDepthInsufficient() public {
+        _fundPool(50e6);
+        vm.prank(admin);
+        bank.setMaxRebalanceAmount(100e6);
+        vm.prank(admin);
+        bank.setAllowlistedDestChain(42, true);
+
+        vm.prank(rebalancer);
+        vm.expectRevert(Bank.InsufficientPoolLiquidity.selector);
+        bank.rebalance(42, 100e6);
+    }
+
+    function test_ccipReceiveMintsPoolAndRejectsReplay() public {
+        bytes32 messageId = keccak256("ccip-message");
+        uint256 amount = 250e6;
+        vm.prank(admin);
+        bank.setAllowlistedSourceContract(99, address(bank), true);
+        vm.prank(admin);
+        bank.setCcipRouter(address(this));
+
+        vm.expectEmit(true, true, false, true);
+        emit RebalanceCompleted(messageId, 99, amount);
+        bank.ccipReceive(99, address(bank), amount, messageId);
+
+        assertEq(syncUSD.balanceOf(address(bank)), amount);
+        assertEq(bank.poolDepth(), amount);
+        assertTrue(bank.processedMessages(messageId));
+
+        vm.expectRevert(abi.encodeWithSelector(Bank.RebalanceMessageAlreadyProcessed.selector, messageId));
+        bank.ccipReceive(99, address(bank), amount, messageId);
+    }
+
+    function test_ccipReceiveRejectsNonAllowlistedSource() public {
+        bytes32 messageId = keccak256("ccip-message");
+        vm.prank(admin);
+        bank.setCcipRouter(address(this));
+
+        vm.expectRevert(abi.encodeWithSelector(Bank.SourceContractNotAllowlisted.selector, uint64(99), address(bank)));
+        bank.ccipReceive(99, address(bank), 100e6, messageId);
+    }
+
+    function test_ccipReceiveRejectsUnauthorizedRouter() public {
+        bytes32 messageId = keccak256("ccip-message");
+        vm.prank(admin);
+        bank.setCcipRouter(address(this));
+        vm.prank(admin);
+        bank.setAllowlistedSourceContract(99, address(bank), true);
+
+        vm.prank(unauthorized);
+        vm.expectRevert(abi.encodeWithSelector(Bank.UnauthorizedCcipRouter.selector, unauthorized));
+        bank.ccipReceive(99, address(bank), 100e6, messageId);
     }
 
     // ── UUPS upgrade ────────────────────────────────────────────────────

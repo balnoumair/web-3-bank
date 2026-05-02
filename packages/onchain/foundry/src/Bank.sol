@@ -15,18 +15,13 @@ import {IBurnMintERC20} from "./interfaces/IBurnMintERC20.sol";
 /// @notice Liquidity pool contract managing deposits, withdrawals, and hot path cross-chain transfers.
 /// @dev UUPS upgradeable. One instance deployed per chain.
 ///      - RELAYER_ROLE: Treasury Service relayer — may call `releaseHotPath`
+///      - REBALANCER_ROLE: Treasury Service cold-path signer — may call `rebalance`
 ///      - ADMIN_ROLE:   Protected by Timelock — may authorize upgrades and set fee collector
 ///      - PAUSER_ROLE:  Emergency multisig — may pause/unpause
 ///      - DEFAULT_ADMIN_ROLE: Timelock — may grant/revoke roles
 ///
 ///      The Bank must be granted MINTER_ROLE on SyncUSD post-deploy to enable deposit/withdraw.
-contract Bank is
-    Initializable,
-    AccessControlUpgradeable,
-    PausableUpgradeable,
-    ReentrancyGuard,
-    UUPSUpgradeable
-{
+contract Bank is Initializable, AccessControlUpgradeable, PausableUpgradeable, ReentrancyGuard, UUPSUpgradeable {
     using SafeERC20 for IERC20;
 
     // ── Errors ─────────────────────────────────────────────────────────
@@ -37,11 +32,17 @@ contract Bank is
     error TransferAlreadyReleased(bytes32 sourceEventHash);
     error TokenNotAllowed(address token);
     error InvalidTokenDecimals(address token, uint8 decimals);
+    error RebalanceCapExceeded(uint256 amount, uint256 maxRebalanceAmount);
+    error DestChainNotAllowlisted(uint64 destChainId);
+    error SourceContractNotAllowlisted(uint64 sourceChainId, address sourceContract);
+    error RebalanceMessageAlreadyProcessed(bytes32 messageId);
+    error UnauthorizedCcipRouter(address caller);
 
     // ── Roles ──────────────────────────────────────────────────────────
 
     bytes32 public constant ADMIN_ROLE = keccak256("ADMIN_ROLE");
     bytes32 public constant RELAYER_ROLE = keccak256("RELAYER_ROLE");
+    bytes32 public constant REBALANCER_ROLE = keccak256("REBALANCER_ROLE");
     bytes32 public constant PAUSER_ROLE = keccak256("PAUSER_ROLE");
 
     // ── Events ─────────────────────────────────────────────────────────
@@ -76,6 +77,24 @@ contract Bank is
     /// @notice Emitted when a token is removed from the deposit/withdrawal allowlist.
     event TokenDisallowed(address indexed token);
 
+    /// @notice Emitted when cold-path pool liquidity is burned for cross-chain rebalance.
+    event RebalanceInitiated(bytes32 indexed messageId, uint64 indexed destChainId, uint256 amount);
+
+    /// @notice Emitted when cold-path pool liquidity is minted after cross-chain delivery.
+    event RebalanceCompleted(bytes32 indexed messageId, uint64 indexed sourceChainId, uint256 amount);
+
+    /// @notice Emitted when the maximum permitted single rebalance amount is updated.
+    event MaxRebalanceAmountUpdated(uint256 amount);
+
+    /// @notice Emitted when an outbound CCIP destination chain is allowlisted or removed.
+    event AllowlistedDestChainUpdated(uint64 indexed destChainId, bool allowed);
+
+    /// @notice Emitted when an inbound CCIP source Bank contract is allowlisted or removed.
+    event AllowlistedSourceContractUpdated(uint64 indexed sourceChainId, address indexed sourceContract, bool allowed);
+
+    /// @notice Emitted when the CCIP router allowed to deliver inbound messages is updated.
+    event CcipRouterUpdated(address indexed router);
+
     // ── State ──────────────────────────────────────────────────────────
 
     /// @notice The SyncUSD token this Bank mints/burns.
@@ -93,6 +112,24 @@ contract Bank is
     /// @notice Tokens approved for deposit and withdrawal.
     mapping(address => bool) public allowedTokens;
 
+    /// @notice Maximum SyncUSD amount that may be rebalanced in one cold-path operation.
+    uint256 public maxRebalanceAmount;
+
+    /// @notice CCIP router authorized to deliver inbound rebalance messages.
+    address public ccipRouter;
+
+    /// @notice Destination CCIP chain selectors permitted for outbound rebalances.
+    mapping(uint64 => bool) public allowlistedDestChains;
+
+    /// @notice Source chain + Bank contract pairs permitted for inbound rebalances.
+    mapping(uint64 => mapping(address => bool)) public allowlistedSourceContracts;
+
+    /// @notice CCIP message IDs already processed by this Bank.
+    mapping(bytes32 => bool) public processedMessages;
+
+    /// @dev Monotonic counter for deterministic cold-path message IDs.
+    uint256 private _rebalanceNonce;
+
     // ── Constructor ────────────────────────────────────────────────────
 
     /// @custom:oz-upgrades-unsafe-allow constructor
@@ -107,12 +144,7 @@ contract Bank is
     /// @param pauser       Receives PAUSER_ROLE (emergency multisig in production).
     /// @param syncUSD_     Address of the SyncUSD token proxy.
     /// @param feeCollector_ Initial fee collector address (may be address(0) to disable fees).
-    function initialize(
-        address admin,
-        address pauser,
-        address syncUSD_,
-        address feeCollector_
-    ) external initializer {
+    function initialize(address admin, address pauser, address syncUSD_, address feeCollector_) external initializer {
         if (admin == address(0) || pauser == address(0) || syncUSD_ == address(0)) revert ZeroAddress();
 
         __AccessControl_init();
@@ -175,9 +207,7 @@ contract Bank is
         IERC20(address(syncUSD)).safeTransferFrom(msg.sender, address(this), amount);
 
         uint256 fee = 0; // Reserved
-        bytes32 eventHash = keccak256(
-            abi.encode(msg.sender, to, amount, destinationChainId, block.chainid, _nonce++)
-        );
+        bytes32 eventHash = keccak256(abi.encode(msg.sender, to, amount, destinationChainId, block.chainid, _nonce++));
 
         emit HotPathInitiated(msg.sender, to, amount, destinationChainId, eventHash, fee);
     }
@@ -203,6 +233,51 @@ contract Bank is
         released[sourceEventHash] = true;
         IERC20(address(syncUSD)).safeTransfer(to, amount);
         emit HotPathReleased(to, amount, sourceEventHash);
+    }
+
+    /// @notice Burns local pool SyncUSD and emits a CCIP-compatible cold-path message ID.
+    /// @dev The emitted `messageId` is the audit key Treasury records for the rebalance op.
+    function rebalance(uint64 destChainId, uint256 amount)
+        external
+        whenNotPaused
+        nonReentrant
+        onlyRole(REBALANCER_ROLE)
+        returns (bytes32 messageId)
+    {
+        if (amount == 0) revert ZeroAmount();
+        if (amount > maxRebalanceAmount) revert RebalanceCapExceeded(amount, maxRebalanceAmount);
+        if (!allowlistedDestChains[destChainId]) revert DestChainNotAllowlisted(destChainId);
+        if (IERC20(address(syncUSD)).balanceOf(address(this)) < amount) {
+            revert InsufficientPoolLiquidity();
+        }
+
+        messageId = keccak256(abi.encode(block.chainid, address(this), destChainId, amount, _rebalanceNonce++));
+        syncUSD.burn(amount);
+        emit RebalanceInitiated(messageId, destChainId, amount);
+    }
+
+    /// @notice Receives a cold-path rebalance delivery from the CCIP execution surface.
+    /// @dev Source chain and source Bank are checked against the inbound allowlist.
+    function ccipReceive(uint64 sourceChainId, address sourceContract, uint256 amount, bytes32 messageId)
+        external
+        whenNotPaused
+        nonReentrant
+    {
+        if (msg.sender != ccipRouter) revert UnauthorizedCcipRouter(msg.sender);
+        _ccipReceive(sourceChainId, sourceContract, amount, messageId);
+    }
+
+    function _ccipReceive(uint64 sourceChainId, address sourceContract, uint256 amount, bytes32 messageId) internal {
+        if (sourceContract == address(0)) revert ZeroAddress();
+        if (amount == 0) revert ZeroAmount();
+        if (!allowlistedSourceContracts[sourceChainId][sourceContract]) {
+            revert SourceContractNotAllowlisted(sourceChainId, sourceContract);
+        }
+        if (processedMessages[messageId]) revert RebalanceMessageAlreadyProcessed(messageId);
+
+        processedMessages[messageId] = true;
+        syncUSD.mint(address(this), amount);
+        emit RebalanceCompleted(messageId, sourceChainId, amount);
     }
 
     /// @notice Returns the SyncUSD balance held in this pool, available for hot-path releases.
@@ -231,6 +306,35 @@ contract Bank is
         emit TokenDisallowed(token);
     }
 
+    /// @notice Updates the per-call cold-path rebalance cap. Restricted to ADMIN_ROLE.
+    function setMaxRebalanceAmount(uint256 amount) external onlyRole(ADMIN_ROLE) {
+        maxRebalanceAmount = amount;
+        emit MaxRebalanceAmountUpdated(amount);
+    }
+
+    /// @notice Updates the CCIP router authorized to call `ccipReceive`. Restricted to ADMIN_ROLE.
+    function setCcipRouter(address router) external onlyRole(ADMIN_ROLE) {
+        if (router == address(0)) revert ZeroAddress();
+        ccipRouter = router;
+        emit CcipRouterUpdated(router);
+    }
+
+    /// @notice Adds or removes an outbound cold-path destination. Restricted to ADMIN_ROLE.
+    function setAllowlistedDestChain(uint64 destChainId, bool allowed) external onlyRole(ADMIN_ROLE) {
+        allowlistedDestChains[destChainId] = allowed;
+        emit AllowlistedDestChainUpdated(destChainId, allowed);
+    }
+
+    /// @notice Adds or removes an inbound cold-path source Bank. Restricted to ADMIN_ROLE.
+    function setAllowlistedSourceContract(uint64 sourceChainId, address sourceContract, bool allowed)
+        external
+        onlyRole(ADMIN_ROLE)
+    {
+        if (sourceContract == address(0)) revert ZeroAddress();
+        allowlistedSourceContracts[sourceChainId][sourceContract] = allowed;
+        emit AllowlistedSourceContractUpdated(sourceChainId, sourceContract, allowed);
+    }
+
     // ── Pause ──────────────────────────────────────────────────────────
 
     /// @notice Pauses all state-mutating functions.
@@ -246,9 +350,5 @@ contract Bank is
     // ── UUPS ───────────────────────────────────────────────────────────
 
     /// @dev Only ADMIN_ROLE may authorize upgrades.
-    function _authorizeUpgrade(address newImplementation)
-        internal
-        override
-        onlyRole(ADMIN_ROLE)
-    {}
+    function _authorizeUpgrade(address newImplementation) internal override onlyRole(ADMIN_ROLE) {}
 }

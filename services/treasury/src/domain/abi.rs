@@ -44,6 +44,28 @@ pub fn encode_rebalance(selector: &[u8; 4], dest_chain_id: u64, amount: &U256) -
 /// topic. We look for the first log with at least 2 topics where the
 /// second is a valid 32-byte hex value (0x-prefixed, 66 chars).
 pub fn extract_ccip_message_id(logs: &[serde_json::Value]) -> Option<String> {
+    let rebalance_initiated_topic = format!(
+        "{}",
+        alloy_primitives::keccak256(b"RebalanceInitiated(bytes32,uint64,uint256)")
+    );
+
+    for log in logs {
+        if let Some(topics) = log["topics"].as_array() {
+            let topic0_matches = topics
+                .first()
+                .and_then(|topic| topic.as_str())
+                .map(|topic| topic.eq_ignore_ascii_case(&rebalance_initiated_topic))
+                .unwrap_or(false);
+            if topic0_matches {
+                if let Some(topic1) = topics.get(1).and_then(|topic| topic.as_str()) {
+                    if topic1.len() == 66 {
+                        return Some(topic1.to_string());
+                    }
+                }
+            }
+        }
+    }
+
     for log in logs {
         if let Some(topics) = log["topics"].as_array() {
             if topics.len() >= 2 {
@@ -56,4 +78,29 @@ pub fn extract_ccip_message_id(logs: &[serde_json::Value]) -> Option<String> {
         }
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn extracts_rebalance_initiated_message_id_before_other_topics() {
+        let message_id = "0x1111111111111111111111111111111111111111111111111111111111111111";
+        let transfer_from_topic =
+            "0x000000000000000000000000aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let event_topic = format!(
+            "{}",
+            alloy_primitives::keccak256(b"RebalanceInitiated(bytes32,uint64,uint256)")
+        );
+        let logs = vec![
+            serde_json::json!({"topics": [
+                "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
+                transfer_from_topic
+            ]}),
+            serde_json::json!({"topics": [event_topic, message_id]}),
+        ];
+
+        assert_eq!(extract_ccip_message_id(&logs), Some(message_id.to_string()));
+    }
 }
