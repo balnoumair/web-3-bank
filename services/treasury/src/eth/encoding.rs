@@ -9,7 +9,7 @@ use alloy_primitives::U256;
 /// Decode a hex string (with or without `0x` prefix) into bytes.
 pub fn decode_hex(s: &str) -> Option<Vec<u8>> {
     let s = s.strip_prefix("0x").unwrap_or(s);
-    if s.len() % 2 != 0 {
+    if !s.len().is_multiple_of(2) {
         return None;
     }
     (0..s.len())

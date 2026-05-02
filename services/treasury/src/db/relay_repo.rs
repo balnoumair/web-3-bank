@@ -181,7 +181,7 @@ mod tests {
         }
     }
 
-    #[sqlx::test(migrations = "migrations")]
+    #[sqlx::test(migrations = "./migrations")]
     async fn insert_and_query_relay_log(pool: PgPool) {
         let repo = PgRelayRepository::new(pool);
         let event = make_event("0xhash1", 1, 2, 1000);
@@ -192,7 +192,7 @@ mod tests {
         assert!(repo.relay_already_recorded(&event.source_event_hash).await);
     }
 
-    #[sqlx::test(migrations = "migrations")]
+    #[sqlx::test(migrations = "./migrations")]
     async fn insert_idempotent_on_conflict(pool: PgPool) {
         let repo = PgRelayRepository::new(pool);
         let event = make_event("0xhash2", 1, 2, 500);
@@ -205,7 +205,7 @@ mod tests {
         assert_eq!(status.as_deref(), Some("pending")); // ON CONFLICT DO NOTHING
     }
 
-    #[sqlx::test(migrations = "migrations")]
+    #[sqlx::test(migrations = "./migrations")]
     async fn update_relay_log_to_completed(pool: PgPool) {
         let repo = PgRelayRepository::new(pool);
         let event = make_event("0xhash3", 1, 2, 200);
@@ -220,7 +220,7 @@ mod tests {
         assert_eq!(status.as_deref(), Some("completed"));
     }
 
-    #[sqlx::test(migrations = "migrations")]
+    #[sqlx::test(migrations = "./migrations")]
     async fn update_relay_log_failed(pool: PgPool) {
         let repo = PgRelayRepository::new(pool);
         let event = make_event("0xhash4", 1, 2, 100);
@@ -233,7 +233,7 @@ mod tests {
         assert_eq!(status.as_deref(), Some("failed"));
     }
 
-    #[sqlx::test(migrations = "migrations")]
+    #[sqlx::test(migrations = "./migrations")]
     async fn get_relay_status_missing_returns_none(pool: PgPool) {
         let repo = PgRelayRepository::new(pool);
         let hash = EventHash("0xnonexistent".to_string());

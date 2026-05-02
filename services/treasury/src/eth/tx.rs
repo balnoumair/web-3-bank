@@ -15,18 +15,16 @@ use crate::error::TxError;
 
 /// Load a signing key from a hex-encoded file and derive its Ethereum address.
 pub fn load_signing_key(path: &str) -> (Option<Arc<SigningKey>>, Option<Address>) {
-    let contents = match std::fs::read_to_string(path) {
-        Ok(c) => c,
-        Err(_) => return (None, None),
+    let Ok(contents) = std::fs::read_to_string(path) else {
+        return (None, None);
     };
     let hex = contents.trim().trim_start_matches("0x");
     let bytes = match decode_hex(hex) {
         Some(b) if b.len() == 32 => b,
         _ => return (None, None),
     };
-    let key = match SigningKey::from_bytes(bytes.as_slice().into()) {
-        Ok(k) => k,
-        Err(_) => return (None, None),
+    let Ok(key) = SigningKey::from_bytes(bytes.as_slice().into()) else {
+        return (None, None);
     };
     let uncompressed = key.verifying_key().to_encoded_point(false);
     let hash = keccak256(&uncompressed.as_bytes()[1..]); // skip 0x04 prefix

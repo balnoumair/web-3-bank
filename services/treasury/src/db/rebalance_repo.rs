@@ -112,7 +112,7 @@ mod tests {
     use alloy_primitives::U256;
     use sqlx::PgPool;
 
-    #[sqlx::test(migrations = "migrations")]
+    #[sqlx::test(migrations = "./migrations")]
     async fn insert_and_op_in_flight(pool: PgPool) {
         let repo = PgRebalanceRepository::new(pool);
         let op_id = OperationId("chain1-chain2-000".to_string());
@@ -125,7 +125,7 @@ mod tests {
         assert!(repo.op_in_flight(src, dst).await);
     }
 
-    #[sqlx::test(migrations = "migrations")]
+    #[sqlx::test(migrations = "./migrations")]
     async fn insert_idempotent_on_conflict(pool: PgPool) {
         let repo = PgRebalanceRepository::new(pool);
         let op_id = OperationId("chain1-chain2-001".to_string());
@@ -138,7 +138,7 @@ mod tests {
         assert!(repo.op_in_flight(src, dst).await);
     }
 
-    #[sqlx::test(migrations = "migrations")]
+    #[sqlx::test(migrations = "./migrations")]
     async fn update_submitted(pool: PgPool) {
         let repo = PgRebalanceRepository::new(pool);
         let op_id = OperationId("chain3-chain4-002".to_string());
@@ -152,7 +152,7 @@ mod tests {
         assert!(repo.op_in_flight(ChainId(3), ChainId(4)).await);
     }
 
-    #[sqlx::test(migrations = "migrations")]
+    #[sqlx::test(migrations = "./migrations")]
     async fn update_failed_removes_in_flight(pool: PgPool) {
         let repo = PgRebalanceRepository::new(pool);
         let op_id = OperationId("chain5-chain6-003".to_string());

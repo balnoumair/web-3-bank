@@ -20,8 +20,8 @@ use crate::grpc::{
     CreateUserRequest, CreateUserResponse, Credential, GetUserByAddressRequest,
     GetUserByAddressResponse, GetUserByCredentialIdRequest, GetUserByCredentialIdResponse,
     GetUserByUsernameRequest, GetUserByUsernameResponse, ListCredentialsRequest,
-    ListCredentialsResponse, RevokeCredentialRequest, RevokeCredentialResponse,
-    SetUsernameRequest, SetUsernameResponse, UpdateUserRequest, UpdateUserResponse,
+    ListCredentialsResponse, RevokeCredentialRequest, RevokeCredentialResponse, SetUsernameRequest,
+    SetUsernameResponse, UpdateUserRequest, UpdateUserResponse,
 };
 
 fn domain_err_to_status(e: DomainError) -> Status {
@@ -261,8 +261,7 @@ impl UserService for UserServiceImpl {
             .map_err(|_| Status::invalid_argument("user_id must be a valid UUID"))?;
 
         // Validate format before touching the DB.
-        let username =
-            Username::try_from(req.username.as_str()).map_err(domain_err_to_status)?;
+        let username = Username::try_from(req.username.as_str()).map_err(domain_err_to_status)?;
 
         // Confirm user exists.
         self.user_repo
@@ -299,8 +298,7 @@ impl UserService for UserServiceImpl {
     ) -> Result<Response<GetUserByUsernameResponse>, Status> {
         let req = request.into_inner();
 
-        let username =
-            Username::try_from(req.username.as_str()).map_err(domain_err_to_status)?;
+        let username = Username::try_from(req.username.as_str()).map_err(domain_err_to_status)?;
 
         let row = self
             .credential_repo
@@ -660,7 +658,10 @@ mod tests {
         assert_eq!(lookup.user_id, create_resp.user_id);
         assert_eq!(lookup.display_name, "Charlie");
         assert_eq!(lookup.username, "charlie99");
-        assert_eq!(lookup.tempo_address, "0xeeee555555555555555555555555555555555555");
+        assert_eq!(
+            lookup.tempo_address,
+            "0xeeee555555555555555555555555555555555555"
+        );
     }
 
     #[sqlx::test]

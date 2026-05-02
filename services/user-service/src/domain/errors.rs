@@ -29,7 +29,9 @@ pub enum DomainError {
     #[error("invalid tempo address: must be 0x-prefixed 40-char hex")]
     InvalidTempoAddress,
 
-    #[error("invalid username: must be 3-20 chars, start with a letter, alphanumeric/underscore only")]
+    #[error(
+        "invalid username: must be 3-20 chars, start with a letter, alphanumeric/underscore only"
+    )]
     InvalidUsername,
 
     #[error("username already taken")]

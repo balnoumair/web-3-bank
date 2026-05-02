@@ -178,7 +178,11 @@ mod tests {
         let uname = Username::try_from("alice123").unwrap();
         repo.set_username(id, &uname).await.unwrap();
 
-        let user = repo.get_by_id(id).await.unwrap().expect("user should exist");
+        let user = repo
+            .get_by_id(id)
+            .await
+            .unwrap()
+            .expect("user should exist");
         assert_eq!(user.username.unwrap().as_str(), "alice123");
     }
 
