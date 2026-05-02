@@ -20,6 +20,7 @@ export function makeMutationResolvers(mutations: MutationUseCases) {
         credentialId: string;
         publicKey: string;
         displayName?: string | null;
+        chainId?: number | null;
       }
     ) => {
       return mutations.registerUser(args);
@@ -37,7 +38,7 @@ export function makeMutationResolvers(mutations: MutationUseCases) {
 
     authenticate: async (
       _: unknown,
-      args: { credentialId: string }
+      args: { credentialId: string; chainId?: number | null }
     ) => {
       return mutations.authenticate(args);
     },

@@ -11,6 +11,10 @@ service UserService {
   rpc RevokeCredential(RevokeCredentialRequest) returns (RevokeCredentialResponse);
   rpc SetUsername(SetUsernameRequest) returns (SetUsernameResponse);
   rpc GetUserByUsername(GetUserByUsernameRequest) returns (GetUserByUsernameResponse);
+
+  // Home chain — set on first deposit (Treasury); read by BFF for hot-path routing.
+  rpc GetUserHomeChain(GetUserHomeChainRequest) returns (GetUserHomeChainResponse);
+  rpc SetUserHomeChain(SetUserHomeChainRequest) returns (SetUserHomeChainResponse);
 }
 
 // credential_id is raw bytes throughout. The BFF must base64url-decode
@@ -106,3 +110,17 @@ message RevokeCredentialRequest {
 message RevokeCredentialResponse {
   bool success = 1;
 }
+
+message GetUserHomeChainRequest {
+  string tempo_address = 1;
+}
+message GetUserHomeChainResponse {
+  bool found = 1;
+  uint64 chain_id = 2;
+}
+
+message SetUserHomeChainRequest {
+  string tempo_address = 1;
+  uint64 chain_id = 2;
+}
+message SetUserHomeChainResponse {}

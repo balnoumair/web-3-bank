@@ -18,7 +18,7 @@ use crate::proto::treasury::{
     GetBalanceResponse, GetPoolDepthRequest, GetPoolDepthResponse, GetRecentTransfersRequest,
     GetRecentTransfersResponse, GetRelayStatusRequest, GetRelayStatusResponse,
     GetWatcherAlertsRequest, GetWatcherAlertsResponse, HealthCheckRequest, HealthCheckResponse,
-    TransferRecord,
+    IsChainActiveRequest, IsChainActiveResponse, TransferRecord,
 };
 use crate::watcher::Watcher;
 
@@ -116,6 +116,15 @@ impl TreasuryService for TreasuryServer {
             })
             .collect();
         Ok(Response::new(GetRecentTransfersResponse { transfers }))
+    }
+
+    async fn is_chain_active(
+        &self,
+        req: Request<IsChainActiveRequest>,
+    ) -> Result<Response<IsChainActiveResponse>, Status> {
+        let chain_id = req.into_inner().chain_id;
+        let active = self.hot_path.is_chain_active(chain_id).await;
+        Ok(Response::new(IsChainActiveResponse { active }))
     }
 }
 

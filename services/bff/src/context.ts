@@ -5,6 +5,8 @@ export type JwtPayload = {
   userId: string;
   address: string;
   credentialId: string;
+  /** EIP-155 chain where the user signs (set at auth/register). */
+  chainId: number;
 };
 
 export type Context = {

@@ -18,10 +18,13 @@ use crate::domain::validation::{TempoAddress, Username};
 use crate::grpc::{
     user_service_server::UserService, AddCredentialRequest, AddCredentialResponse,
     CreateUserRequest, CreateUserResponse, Credential, GetUserByAddressRequest,
-    GetUserByAddressResponse, GetUserByCredentialIdRequest, GetUserByCredentialIdResponse,
-    GetUserByUsernameRequest, GetUserByUsernameResponse, ListCredentialsRequest,
-    ListCredentialsResponse, RevokeCredentialRequest, RevokeCredentialResponse,
-    SetUsernameRequest, SetUsernameResponse, UpdateUserRequest, UpdateUserResponse,
+    GetUserByAddressResponse,
+    GetUserByCredentialIdRequest, GetUserByCredentialIdResponse,
+    GetUserByUsernameRequest, GetUserByUsernameResponse, GetUserHomeChainRequest,
+    GetUserHomeChainResponse, ListCredentialsRequest, ListCredentialsResponse,
+    RevokeCredentialRequest, RevokeCredentialResponse, SetUserHomeChainRequest,
+    SetUserHomeChainResponse, SetUsernameRequest, SetUsernameResponse, UpdateUserRequest,
+    UpdateUserResponse,
 };
 
 fn domain_err_to_status(e: DomainError) -> Status {
@@ -333,6 +336,48 @@ impl UserService for UserServiceImpl {
             .map_err(domain_err_to_status)?;
 
         Ok(Response::new(RevokeCredentialResponse { success: true }))
+    }
+
+    async fn get_user_home_chain(
+        &self,
+        request: Request<GetUserHomeChainRequest>,
+    ) -> Result<Response<GetUserHomeChainResponse>, Status> {
+        let req = request.into_inner();
+        let addr =
+            TempoAddress::try_from(req.tempo_address.as_str()).map_err(domain_err_to_status)?;
+
+        let home = self
+            .user_repo
+            .get_home_chain_by_tempo_address(&addr)
+            .await
+            .map_err(domain_err_to_status)?;
+
+        match home {
+            Some(chain_id) if chain_id >= 0 => Ok(Response::new(GetUserHomeChainResponse {
+                found: true,
+                chain_id: chain_id as u64,
+            })),
+            _ => Ok(Response::new(GetUserHomeChainResponse {
+                found: false,
+                chain_id: 0,
+            })),
+        }
+    }
+
+    async fn set_user_home_chain(
+        &self,
+        request: Request<SetUserHomeChainRequest>,
+    ) -> Result<Response<SetUserHomeChainResponse>, Status> {
+        let req = request.into_inner();
+        let addr =
+            TempoAddress::try_from(req.tempo_address.as_str()).map_err(domain_err_to_status)?;
+
+        self.user_repo
+            .set_home_chain_if_unset(&addr, req.chain_id as i64)
+            .await
+            .map_err(domain_err_to_status)?;
+
+        Ok(Response::new(SetUserHomeChainResponse {}))
     }
 }
 
@@ -674,5 +719,84 @@ mod tests {
             .await
             .unwrap_err();
         assert_eq!(err.code(), tonic::Code::NotFound);
+    }
+
+    #[sqlx::test]
+    async fn test_home_chain_first_set_then_sticky(pool: PgPool) {
+        let addr = start_test_server(pool).await;
+        let tempo = "0x1111111111111111111111111111111111111111";
+        client(&addr)
+            .await
+            .create_user(CreateUserRequest {
+                display_name: Some("Homer".to_string()),
+                credential_id: b"cred-home".to_vec(),
+                public_key: b"pk-home".to_vec(),
+                tempo_address: tempo.to_string(),
+            })
+            .await
+            .unwrap();
+
+        let unset = client(&addr)
+            .await
+            .get_user_home_chain(GetUserHomeChainRequest {
+                tempo_address: tempo.to_string(),
+            })
+            .await
+            .unwrap()
+            .into_inner();
+        assert!(!unset.found);
+
+        client(&addr)
+            .await
+            .set_user_home_chain(SetUserHomeChainRequest {
+                tempo_address: tempo.to_string(),
+                chain_id: 1337,
+            })
+            .await
+            .unwrap();
+
+        let first = client(&addr)
+            .await
+            .get_user_home_chain(GetUserHomeChainRequest {
+                tempo_address: tempo.to_string(),
+            })
+            .await
+            .unwrap()
+            .into_inner();
+        assert!(first.found);
+        assert_eq!(first.chain_id, 1337);
+
+        client(&addr)
+            .await
+            .set_user_home_chain(SetUserHomeChainRequest {
+                tempo_address: tempo.to_string(),
+                chain_id: 9999,
+            })
+            .await
+            .unwrap();
+
+        let still = client(&addr)
+            .await
+            .get_user_home_chain(GetUserHomeChainRequest {
+                tempo_address: tempo.to_string(),
+            })
+            .await
+            .unwrap()
+            .into_inner();
+        assert_eq!(still.chain_id, 1337);
+    }
+
+    #[sqlx::test]
+    async fn test_get_user_home_chain_unknown_address(pool: PgPool) {
+        let addr = start_test_server(pool).await;
+        let res = client(&addr)
+            .await
+            .get_user_home_chain(GetUserHomeChainRequest {
+                tempo_address: "0x2222222222222222222222222222222222222222".to_string(),
+            })
+            .await
+            .unwrap()
+            .into_inner();
+        assert!(!res.found);
     }
 }

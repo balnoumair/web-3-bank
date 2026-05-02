@@ -5,6 +5,13 @@ export type AuthPayload = { token: string; userId: string };
 
 export type MutationUseCases = ReturnType<typeof makeMutationUseCases>;
 
+function resolvedChainId(chainId?: number | null): number {
+  if (typeof chainId === "number" && Number.isFinite(chainId)) {
+    return chainId;
+  }
+  return Number(process.env.DEFAULT_CHAIN_ID || "1337");
+}
+
 /** Decode a base64url string (from the browser WebAuthn API) into a Buffer. */
 function base64urlToBuffer(b64url: string): Buffer {
   const base64 = b64url.replace(/-/g, "+").replace(/_/g, "/");
@@ -22,6 +29,7 @@ export function makeMutationUseCases(userService: IUserService) {
       credentialId: string;
       publicKey: string;
       displayName?: string | null;
+      chainId?: number | null;
     }): Promise<AuthPayload> => {
       const { userId } = await userService.createUser({
         displayName: args.displayName ?? undefined,
@@ -34,6 +42,7 @@ export function makeMutationUseCases(userService: IUserService) {
         userId,
         address: args.address,
         credentialId: args.credentialId,
+        chainId: resolvedChainId(args.chainId),
       });
 
       return { token, userId };
@@ -41,6 +50,7 @@ export function makeMutationUseCases(userService: IUserService) {
 
     authenticate: async (args: {
       credentialId: string;
+      chainId?: number | null;
     }): Promise<AuthPayload> => {
       // Look up the user by their WebAuthn credential ID (the passkey
       // assertion doesn't return the public key, so we can't derive the
@@ -53,6 +63,7 @@ export function makeMutationUseCases(userService: IUserService) {
         userId,
         address: tempoAddress,
         credentialId: args.credentialId,
+        chainId: resolvedChainId(args.chainId),
       });
 
       return { token, userId };

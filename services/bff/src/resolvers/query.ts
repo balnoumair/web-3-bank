@@ -45,8 +45,17 @@ export function makeQueryResolvers(queries: QueryUseCases) {
       args: { username: string },
       ctx: Context
     ) => {
-      requireAuth(ctx);
-      return queries.resolveUsername(args.username);
+      const user = requireAuth(ctx);
+      return queries.resolveUsername(args.username, user.chainId);
+    },
+
+    resolveRecipientRouting: async (
+      _: unknown,
+      args: { tempoAddress: string },
+      ctx: Context
+    ) => {
+      const user = requireAuth(ctx);
+      return queries.resolveRecipientRouting(args.tempoAddress, user.chainId);
     },
   };
 }
