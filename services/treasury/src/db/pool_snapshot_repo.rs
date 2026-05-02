@@ -62,7 +62,7 @@ mod tests {
     use alloy_primitives::U256;
     use sqlx::PgPool;
 
-    #[sqlx::test(migrations = "migrations")]
+    #[sqlx::test(migrations = "./migrations")]
     async fn record_and_retrieve_snapshot(pool: PgPool) {
         let repo = PgPoolSnapshotRepository::new(pool);
         let chain = ChainId(1);
@@ -74,7 +74,7 @@ mod tests {
         assert_eq!(result.unwrap(), depth.to_string());
     }
 
-    #[sqlx::test(migrations = "migrations")]
+    #[sqlx::test(migrations = "./migrations")]
     async fn get_latest_depth_returns_most_recent(pool: PgPool) {
         let repo = PgPoolSnapshotRepository::new(pool);
         let chain = ChainId(2);
@@ -87,7 +87,7 @@ mod tests {
         assert_eq!(result.unwrap(), "300");
     }
 
-    #[sqlx::test(migrations = "migrations")]
+    #[sqlx::test(migrations = "./migrations")]
     async fn get_latest_depth_missing_chain_returns_none(pool: PgPool) {
         let repo = PgPoolSnapshotRepository::new(pool);
         let result = repo.get_latest_depth(ChainId(9999)).await;

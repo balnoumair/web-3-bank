@@ -175,12 +175,9 @@ impl ColdPath {
         info!("cold_path: route receiver polling started");
 
         loop {
-            let to_block = match eth::fetch_block_number(&self.http, &rpc_url).await {
-                Some(b) => b,
-                None => {
-                    tokio::time::sleep(ROUTE_RECEIVER_POLL_INTERVAL).await;
-                    continue;
-                }
+            let Some(to_block) = eth::fetch_block_number(&self.http, &rpc_url).await else {
+                tokio::time::sleep(ROUTE_RECEIVER_POLL_INTERVAL).await;
+                continue;
             };
 
             let scan_from = if last_block == 0 {
@@ -340,22 +337,19 @@ impl ColdPath {
                 None => continue,
             };
             // Infrastructure: re-verify source pool depth before committing.
-            let live_depth = match eth::fetch_pool_depth(
+            let Some(live_depth) = eth::fetch_pool_depth(
                 &self.http,
                 &source_rpc,
                 &source_bank,
                 &self.pool_depth_selector,
             )
             .await
-            {
-                Some(d) => d,
-                None => {
-                    warn!(
-                        source_chain = source_chain.0,
-                        "cold_path: could not re-verify source depth — skipping"
-                    );
-                    continue;
-                }
+            else {
+                warn!(
+                    source_chain = source_chain.0,
+                    "cold_path: could not re-verify source depth — skipping"
+                );
+                continue;
             };
             let op_in_flight = self
                 .rebalance_repo

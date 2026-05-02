@@ -140,7 +140,7 @@ impl Watcher {
             .watcher_repo
             .get_alert_ids(limit)
             .await
-            .map_err(|e| Status::internal(e))?;
+            .map_err(Status::internal)?;
         Ok(Response::new(GetWatcherAlertsResponse { alert_ids }))
     }
 
@@ -168,9 +168,8 @@ impl Watcher {
                 .collect();
 
             for (chain_id, rpc_url, bank_addr) in chains {
-                let to_block = match eth::fetch_block_number(&self.http, &rpc_url).await {
-                    Some(b) => b,
-                    None => continue,
+                let Some(to_block) = eth::fetch_block_number(&self.http, &rpc_url).await else {
+                    continue;
                 };
 
                 let scan_from = match last_block.get(&chain_id) {
@@ -222,9 +221,8 @@ impl Watcher {
                 .collect();
 
             for (chain_id, rpc_url, bank_addr) in chains {
-                let to_block = match eth::fetch_block_number(&self.http, &rpc_url).await {
-                    Some(b) => b,
-                    None => continue,
+                let Some(to_block) = eth::fetch_block_number(&self.http, &rpc_url).await else {
+                    continue;
                 };
 
                 let scan_from = match last_block.get(&chain_id) {

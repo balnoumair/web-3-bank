@@ -56,7 +56,7 @@ impl PoolManager {
         &self,
         req: Request<GetPoolDepthRequest>,
     ) -> Result<Response<GetPoolDepthResponse>, Status> {
-        let chain_id = ChainId(req.into_inner().chain_id as u64);
+        let chain_id = ChainId(req.into_inner().chain_id);
         match self.snapshot_repo.get_latest_depth(chain_id).await {
             Some(depth_wei) => Ok(Response::new(GetPoolDepthResponse { depth_wei })),
             None => Err(Status::not_found("no pool depth snapshot for that chain")),
