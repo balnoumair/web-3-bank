@@ -10,6 +10,7 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {IBurnMintERC20} from "./interfaces/IBurnMintERC20.sol";
+import {IReserveBridge} from "./interfaces/IReserveBridge.sol";
 
 /// @title Bank
 /// @notice Liquidity pool contract managing deposits, withdrawals, and hot path cross-chain transfers.
@@ -37,12 +38,19 @@ contract Bank is Initializable, AccessControlUpgradeable, PausableUpgradeable, R
     error SourceContractNotAllowlisted(uint64 sourceChainId, address sourceContract);
     error RebalanceMessageAlreadyProcessed(bytes32 messageId);
     error UnauthorizedCcipRouter(address caller);
+    error ReserveBridgeNotSet();
+    error ReserveTokenNotSet();
+    error ReserveRebalanceCapExceeded(uint256 amount, uint256 maxReserveRebalanceAmount);
+    error InsufficientReserveLiquidity();
+    error ReserveBridgeMessageAlreadyProcessed(bytes32 messageId);
+    error UnauthorizedReserveBridge(address caller);
 
     // ── Roles ──────────────────────────────────────────────────────────
 
     bytes32 public constant ADMIN_ROLE = keccak256("ADMIN_ROLE");
     bytes32 public constant RELAYER_ROLE = keccak256("RELAYER_ROLE");
     bytes32 public constant REBALANCER_ROLE = keccak256("REBALANCER_ROLE");
+    bytes32 public constant RESERVE_REBALANCER_ROLE = keccak256("RESERVE_REBALANCER_ROLE");
     bytes32 public constant PAUSER_ROLE = keccak256("PAUSER_ROLE");
 
     // ── Events ─────────────────────────────────────────────────────────
@@ -95,6 +103,26 @@ contract Bank is Initializable, AccessControlUpgradeable, PausableUpgradeable, R
     /// @notice Emitted when the CCIP router allowed to deliver inbound messages is updated.
     event CcipRouterUpdated(address indexed router);
 
+    /// @notice Emitted when the reserve token is updated.
+    event ReserveTokenUpdated(address indexed token);
+
+    /// @notice Emitted when the reserve bridge adapter is updated.
+    event ReserveBridgeUpdated(address indexed reserveBridge);
+
+    /// @notice Emitted when the maximum permitted single reserve rebalance amount is updated.
+    event MaxReserveRebalanceAmountUpdated(uint256 amount);
+
+    /// @notice Emitted when an outbound reserve destination is updated.
+    event ReserveDestinationUpdated(uint64 indexed destChainId, address indexed destReserve);
+
+    /// @notice Emitted when USDC reserve bridging is initiated.
+    event ReserveBridgeInitiated(
+        bytes32 indexed messageId, uint64 indexed destChainId, uint256 amount, bytes32 indexed bridgeType
+    );
+
+    /// @notice Emitted when USDC reserve bridging is completed.
+    event ReserveBridgeCompleted(bytes32 indexed messageId, uint64 indexed sourceChainId, uint256 amount);
+
     // ── State ──────────────────────────────────────────────────────────
 
     /// @notice The SyncUSD token this Bank mints/burns.
@@ -129,6 +157,21 @@ contract Bank is Initializable, AccessControlUpgradeable, PausableUpgradeable, R
 
     /// @dev Monotonic counter for deterministic cold-path message IDs.
     uint256 private _rebalanceNonce;
+
+    /// @notice Underlying reserve token bridged by reserve rebalance operations.
+    address public reserveToken;
+
+    /// @notice Bridge adapter used for outbound and inbound reserve bridge operations.
+    IReserveBridge public reserveBridge;
+
+    /// @notice Maximum USDC amount that may be bridged in one reserve rebalance operation.
+    uint256 public maxReserveRebalanceAmount;
+
+    /// @notice Reserve bridge message IDs already processed by this Bank.
+    mapping(bytes32 => bool) public processedReserveMessages;
+
+    /// @notice Destination Bank/reserve address per chain for outbound reserve bridge operations.
+    mapping(uint64 => address) public reserveDestinations;
 
     // ── Constructor ────────────────────────────────────────────────────
 
@@ -256,6 +299,35 @@ contract Bank is Initializable, AccessControlUpgradeable, PausableUpgradeable, R
         emit RebalanceInitiated(messageId, destChainId, amount);
     }
 
+    /// @notice Bridges USDC reserve liquidity to a destination chain Bank.
+    /// @dev The registered adapter is expected to pull `amount` USDC using the approval set here.
+    function bridgeReserve(uint64 destChainId, uint256 amount)
+        external
+        whenNotPaused
+        nonReentrant
+        onlyRole(RESERVE_REBALANCER_ROLE)
+        returns (bytes32 messageId)
+    {
+        IReserveBridge bridge = reserveBridge;
+        if (address(bridge) == address(0)) revert ReserveBridgeNotSet();
+        address token = reserveToken;
+        if (token == address(0)) revert ReserveTokenNotSet();
+        if (amount == 0) revert ZeroAmount();
+        if (amount > maxReserveRebalanceAmount) {
+            revert ReserveRebalanceCapExceeded(amount, maxReserveRebalanceAmount);
+        }
+        if (!allowlistedDestChains[destChainId]) revert DestChainNotAllowlisted(destChainId);
+        address destReserve = reserveDestinations[destChainId];
+        if (destReserve == address(0)) revert DestChainNotAllowlisted(destChainId);
+        if (IERC20(token).balanceOf(address(this)) < amount) revert InsufficientReserveLiquidity();
+
+        IERC20(token).forceApprove(address(bridge), amount);
+        messageId = bridge.bridgeOut(destChainId, amount, destReserve);
+        IERC20(token).forceApprove(address(bridge), 0);
+
+        emit ReserveBridgeInitiated(messageId, destChainId, amount, bridge.bridgeType());
+    }
+
     /// @notice Receives a cold-path rebalance delivery from the CCIP execution surface.
     /// @dev Source chain and source Bank are checked against the inbound allowlist.
     function ccipReceive(uint64 sourceChainId, address sourceContract, uint256 amount, bytes32 messageId)
@@ -280,9 +352,31 @@ contract Bank is Initializable, AccessControlUpgradeable, PausableUpgradeable, R
         emit RebalanceCompleted(messageId, sourceChainId, amount);
     }
 
+    /// @notice Records an inbound reserve bridge delivery from the registered adapter.
+    /// @dev The adapter releases/mints USDC before calling this function; Bank records idempotency and audit.
+    function completeReserveBridge(uint64 sourceChainId, uint256 amount, bytes32 messageId)
+        external
+        whenNotPaused
+        nonReentrant
+    {
+        if (msg.sender != address(reserveBridge)) revert UnauthorizedReserveBridge(msg.sender);
+        if (amount == 0) revert ZeroAmount();
+        if (processedReserveMessages[messageId]) revert ReserveBridgeMessageAlreadyProcessed(messageId);
+
+        processedReserveMessages[messageId] = true;
+        emit ReserveBridgeCompleted(messageId, sourceChainId, amount);
+    }
+
     /// @notice Returns the SyncUSD balance held in this pool, available for hot-path releases.
     function poolDepth() external view returns (uint256) {
         return IERC20(address(syncUSD)).balanceOf(address(this));
+    }
+
+    /// @notice Returns the USDC reserve balance held by this Bank.
+    function reserveDepth() external view returns (uint256) {
+        address token = reserveToken;
+        if (token == address(0)) return 0;
+        return IERC20(token).balanceOf(address(this));
     }
 
     // ── Admin ──────────────────────────────────────────────────────────
@@ -298,6 +392,10 @@ contract Bank is Initializable, AccessControlUpgradeable, PausableUpgradeable, R
         if (token == address(0)) revert ZeroAddress();
         allowedTokens[token] = true;
         emit TokenAllowed(token);
+        if (reserveToken == address(0)) {
+            reserveToken = token;
+            emit ReserveTokenUpdated(token);
+        }
     }
 
     /// @notice Removes a token from the deposit/withdrawal allowlist. Restricted to ADMIN_ROLE.
@@ -306,10 +404,37 @@ contract Bank is Initializable, AccessControlUpgradeable, PausableUpgradeable, R
         emit TokenDisallowed(token);
     }
 
+    /// @notice Updates the underlying reserve token. Restricted to ADMIN_ROLE.
+    function setReserveToken(address token) external onlyRole(ADMIN_ROLE) {
+        if (token == address(0)) revert ZeroAddress();
+        if (!allowedTokens[token]) revert TokenNotAllowed(token);
+        reserveToken = token;
+        emit ReserveTokenUpdated(token);
+    }
+
     /// @notice Updates the per-call cold-path rebalance cap. Restricted to ADMIN_ROLE.
     function setMaxRebalanceAmount(uint256 amount) external onlyRole(ADMIN_ROLE) {
         maxRebalanceAmount = amount;
         emit MaxRebalanceAmountUpdated(amount);
+    }
+
+    /// @notice Updates the per-call reserve rebalance cap. Restricted to ADMIN_ROLE.
+    function setMaxReserveRebalanceAmount(uint256 amount) external onlyRole(ADMIN_ROLE) {
+        maxReserveRebalanceAmount = amount;
+        emit MaxReserveRebalanceAmountUpdated(amount);
+    }
+
+    /// @notice Updates the reserve bridge adapter. Restricted to ADMIN_ROLE.
+    function setReserveBridge(IReserveBridge bridge) external onlyRole(ADMIN_ROLE) {
+        if (address(bridge) == address(0)) revert ZeroAddress();
+        reserveBridge = bridge;
+        emit ReserveBridgeUpdated(address(bridge));
+    }
+
+    /// @notice Updates the destination Bank/reserve address for reserve bridge operations.
+    function setReserveDestination(uint64 destChainId, address destReserve) external onlyRole(ADMIN_ROLE) {
+        reserveDestinations[destChainId] = destReserve;
+        emit ReserveDestinationUpdated(destChainId, destReserve);
     }
 
     /// @notice Updates the CCIP router authorized to call `ccipReceive`. Restricted to ADMIN_ROLE.

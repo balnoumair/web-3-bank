@@ -7,6 +7,7 @@ import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SyncUSD} from "../src/SyncUSD.sol";
 import {Bank} from "../src/Bank.sol";
+import {IReserveBridge} from "../src/interfaces/IReserveBridge.sol";
 
 /// @dev Minimal ERC-20 used as mock USDC in tests.
 contract MockUSDC is ERC20 {
@@ -27,6 +28,43 @@ contract MockToken18 is ERC20 {
 
     function mint(address to, uint256 amount) external {
         _mint(to, amount);
+    }
+}
+
+/// @dev Reserve bridge mock that pulls USDC from the calling Bank and can deliver inbound credits.
+contract MockReserveBridge is IReserveBridge {
+    IERC20 public immutable token;
+    uint256 public nonce;
+
+    event MockBridgeOut(
+        address indexed sourceReserve,
+        uint64 indexed destChainId,
+        address indexed destReserve,
+        uint256 amount,
+        bytes32 messageId
+    );
+
+    constructor(IERC20 token_) {
+        token = token_;
+    }
+
+    function bridgeOut(uint64 destChainId, uint256 amount, address destReserve) external returns (bytes32 messageId) {
+        messageId = keccak256(abi.encode(msg.sender, destChainId, amount, destReserve, nonce++));
+        token.transferFrom(msg.sender, address(this), amount);
+        emit MockBridgeOut(msg.sender, destChainId, destReserve, amount, messageId);
+    }
+
+    function bridgeIn(bytes calldata message) external pure returns (bytes32 messageId) {
+        return keccak256(message);
+    }
+
+    function bridgeType() external pure returns (bytes32) {
+        return keccak256("MOCK_RESERVE_BRIDGE");
+    }
+
+    function deliver(Bank destBank, uint64 sourceChainId, uint256 amount, bytes32 messageId) external {
+        MockUSDC(address(token)).mint(address(destBank), amount);
+        destBank.completeReserveBridge(sourceChainId, amount, messageId);
     }
 }
 
@@ -76,18 +114,21 @@ contract BankTest is Test {
     address public unauthorized = address(0xA6);
     address public feeCollector = address(0xA7);
     address public rebalancer = address(0xA8);
+    address public reserveRebalancer = address(0xA9);
 
     // ── Contracts ──────────────────────────────────────────────────────
 
     SyncUSD public syncUSD;
     Bank public bank;
     MockUSDC public usdc;
+    MockReserveBridge public reserveBridge;
 
     // ── Cached roles ───────────────────────────────────────────────────
 
     bytes32 public MINTER_ROLE;
     bytes32 public RELAYER_ROLE;
     bytes32 public REBALANCER_ROLE;
+    bytes32 public RESERVE_REBALANCER_ROLE;
     bytes32 public PAUSER_ROLE;
     bytes32 public ADMIN_ROLE;
 
@@ -113,6 +154,14 @@ contract BankTest is Test {
     event AllowlistedDestChainUpdated(uint64 indexed destChainId, bool allowed);
     event AllowlistedSourceContractUpdated(uint64 indexed sourceChainId, address indexed sourceContract, bool allowed);
     event CcipRouterUpdated(address indexed router);
+    event ReserveTokenUpdated(address indexed token);
+    event ReserveBridgeUpdated(address indexed reserveBridge);
+    event MaxReserveRebalanceAmountUpdated(uint256 amount);
+    event ReserveDestinationUpdated(uint64 indexed destChainId, address indexed destReserve);
+    event ReserveBridgeInitiated(
+        bytes32 indexed messageId, uint64 indexed destChainId, uint256 amount, bytes32 indexed bridgeType
+    );
+    event ReserveBridgeCompleted(bytes32 indexed messageId, uint64 indexed sourceChainId, uint256 amount);
 
     // ── Setup ──────────────────────────────────────────────────────────
 
@@ -143,12 +192,17 @@ contract BankTest is Test {
         vm.prank(admin);
         bank.grantRole(REBALANCER_ROLE, rebalancer);
 
+        RESERVE_REBALANCER_ROLE = bank.RESERVE_REBALANCER_ROLE();
+        vm.prank(admin);
+        bank.grantRole(RESERVE_REBALANCER_ROLE, reserveRebalancer);
+
         PAUSER_ROLE = bank.PAUSER_ROLE();
         ADMIN_ROLE = bank.ADMIN_ROLE();
 
         // Deploy mock USDC and fund the user
         usdc = new MockUSDC();
         usdc.mint(user, 10_000e6);
+        reserveBridge = new MockReserveBridge(IERC20(address(usdc)));
 
         // Allow USDC for deposit/withdrawal
         vm.prank(admin);
@@ -186,6 +240,12 @@ contract BankTest is Test {
         assertTrue(REBALANCER_ROLE != RELAYER_ROLE);
     }
 
+    function test_reserveRebalancerHasSeparateRole() public view {
+        assertTrue(bank.hasRole(RESERVE_REBALANCER_ROLE, reserveRebalancer));
+        assertTrue(RESERVE_REBALANCER_ROLE != REBALANCER_ROLE);
+        assertTrue(RESERVE_REBALANCER_ROLE != RELAYER_ROLE);
+    }
+
     function test_notPausedAfterInit() public view {
         assertFalse(bank.paused());
     }
@@ -220,6 +280,7 @@ contract BankTest is Test {
 
     function test_usdcIsAllowedAfterSetup() public view {
         assertTrue(bank.allowedTokens(address(usdc)));
+        assertEq(bank.reserveToken(), address(usdc));
     }
 
     function test_adminCanAllowToken() public {
@@ -890,6 +951,201 @@ contract BankTest is Test {
         vm.prank(unauthorized);
         vm.expectRevert(abi.encodeWithSelector(Bank.UnauthorizedCcipRouter.selector, unauthorized));
         bank.ccipReceive(99, address(bank), 100e6, messageId);
+    }
+
+    // ── USDC reserve rebalance ─────────────────────────────────────────
+
+    function _depositReserve(uint256 amount) internal {
+        vm.startPrank(user);
+        usdc.approve(address(bank), amount);
+        bank.deposit(address(usdc), amount);
+        vm.stopPrank();
+    }
+
+    function _configureReserveBridge(uint256 cap) internal {
+        vm.prank(admin);
+        bank.setMaxReserveRebalanceAmount(cap);
+        vm.prank(admin);
+        bank.setReserveBridge(reserveBridge);
+        vm.prank(admin);
+        bank.setAllowlistedDestChain(42, true);
+        vm.prank(admin);
+        bank.setReserveDestination(42, address(bank));
+    }
+
+    function test_adminCanConfigureReserveBridge() public {
+        vm.expectEmit(false, false, false, true);
+        emit MaxReserveRebalanceAmountUpdated(500e6);
+        vm.prank(admin);
+        bank.setMaxReserveRebalanceAmount(500e6);
+        assertEq(bank.maxReserveRebalanceAmount(), 500e6);
+
+        vm.expectEmit(true, false, false, true);
+        emit ReserveBridgeUpdated(address(reserveBridge));
+        vm.prank(admin);
+        bank.setReserveBridge(reserveBridge);
+        assertEq(address(bank.reserveBridge()), address(reserveBridge));
+
+        vm.expectEmit(true, true, false, true);
+        emit ReserveDestinationUpdated(42, address(bank));
+        vm.prank(admin);
+        bank.setReserveDestination(42, address(bank));
+        assertEq(bank.reserveDestinations(42), address(bank));
+
+        MockUSDC newToken = new MockUSDC();
+        vm.prank(admin);
+        bank.allowToken(address(newToken));
+
+        vm.expectEmit(true, false, false, true);
+        emit ReserveTokenUpdated(address(newToken));
+        vm.prank(admin);
+        bank.setReserveToken(address(newToken));
+        assertEq(bank.reserveToken(), address(newToken));
+    }
+
+    function test_nonAdminCannotConfigureReserveBridge() public {
+        vm.prank(unauthorized);
+        vm.expectRevert();
+        bank.setMaxReserveRebalanceAmount(500e6);
+
+        vm.prank(unauthorized);
+        vm.expectRevert();
+        bank.setReserveBridge(reserveBridge);
+
+        vm.prank(unauthorized);
+        vm.expectRevert();
+        bank.setReserveDestination(42, address(bank));
+
+        vm.prank(unauthorized);
+        vm.expectRevert();
+        bank.setReserveToken(address(usdc));
+    }
+
+    function test_reserveDepthReflectsReserveTokenBalance() public {
+        assertEq(bank.reserveDepth(), 0);
+
+        _depositReserve(250e6);
+
+        assertEq(usdc.balanceOf(address(bank)), 250e6);
+        assertEq(bank.reserveDepth(), 250e6);
+    }
+
+    function test_bridgeReserveTransfersReserveAndEmitsMessageId() public {
+        uint256 amount = 100e6;
+        _depositReserve(250e6);
+        _configureReserveBridge(amount);
+
+        bytes32 expectedMessageId = keccak256(abi.encode(address(bank), uint64(42), amount, address(bank), uint256(0)));
+        bytes32 expectedBridgeType = keccak256("MOCK_RESERVE_BRIDGE");
+
+        vm.expectEmit(true, true, true, true);
+        emit ReserveBridgeInitiated(expectedMessageId, 42, amount, expectedBridgeType);
+
+        vm.prank(reserveRebalancer);
+        bytes32 messageId = bank.bridgeReserve(42, amount);
+
+        assertEq(messageId, expectedMessageId);
+        assertEq(usdc.balanceOf(address(reserveBridge)), amount);
+        assertEq(bank.reserveDepth(), 150e6);
+        assertEq(usdc.allowance(address(bank), address(reserveBridge)), 0);
+    }
+
+    function test_completeReserveBridgeRecordsInboundDeliveryAndRejectsReplay() public {
+        uint256 amount = 100e6;
+        _depositReserve(250e6);
+        _configureReserveBridge(amount);
+
+        vm.prank(reserveRebalancer);
+        bytes32 messageId = bank.bridgeReserve(42, amount);
+
+        vm.expectEmit(true, true, false, true);
+        emit ReserveBridgeCompleted(messageId, 99, amount);
+        reserveBridge.deliver(bank, 99, amount, messageId);
+
+        assertEq(bank.reserveDepth(), 250e6);
+        assertTrue(bank.processedReserveMessages(messageId));
+
+        vm.expectRevert(abi.encodeWithSelector(Bank.ReserveBridgeMessageAlreadyProcessed.selector, messageId));
+        reserveBridge.deliver(bank, 99, amount, messageId);
+    }
+
+    function test_completeReserveBridgeRejectsUnauthorizedCaller() public {
+        _configureReserveBridge(100e6);
+        bytes32 messageId = keccak256("reserve-message");
+
+        vm.prank(unauthorized);
+        vm.expectRevert(abi.encodeWithSelector(Bank.UnauthorizedReserveBridge.selector, unauthorized));
+        bank.completeReserveBridge(99, 100e6, messageId);
+    }
+
+    function test_bridgeReserveRevertsForNonReserveRebalancer() public {
+        _depositReserve(100e6);
+        _configureReserveBridge(100e6);
+
+        vm.prank(unauthorized);
+        vm.expectRevert();
+        bank.bridgeReserve(42, 100e6);
+    }
+
+    function test_bridgeReserveRevertsWhenAmountExceedsCap() public {
+        _depositReserve(200e6);
+        _configureReserveBridge(100e6);
+
+        vm.prank(reserveRebalancer);
+        vm.expectRevert(abi.encodeWithSelector(Bank.ReserveRebalanceCapExceeded.selector, 200e6, 100e6));
+        bank.bridgeReserve(42, 200e6);
+        assertEq(bank.reserveDepth(), 200e6);
+    }
+
+    function test_bridgeReserveRevertsWhenDestNotAllowlisted() public {
+        _depositReserve(100e6);
+        vm.prank(admin);
+        bank.setMaxReserveRebalanceAmount(100e6);
+        vm.prank(admin);
+        bank.setReserveBridge(reserveBridge);
+        vm.prank(admin);
+        bank.setReserveDestination(42, address(bank));
+
+        vm.prank(reserveRebalancer);
+        vm.expectRevert(abi.encodeWithSelector(Bank.DestChainNotAllowlisted.selector, uint64(42)));
+        bank.bridgeReserve(42, 100e6);
+    }
+
+    function test_bridgeReserveRevertsWhenDestinationReserveNotConfigured() public {
+        _depositReserve(100e6);
+        vm.prank(admin);
+        bank.setMaxReserveRebalanceAmount(100e6);
+        vm.prank(admin);
+        bank.setReserveBridge(reserveBridge);
+        vm.prank(admin);
+        bank.setAllowlistedDestChain(42, true);
+
+        vm.prank(reserveRebalancer);
+        vm.expectRevert(abi.encodeWithSelector(Bank.DestChainNotAllowlisted.selector, uint64(42)));
+        bank.bridgeReserve(42, 100e6);
+    }
+
+    function test_bridgeReserveRevertsWhenReserveDepthInsufficient() public {
+        _depositReserve(50e6);
+        _configureReserveBridge(100e6);
+
+        vm.prank(reserveRebalancer);
+        vm.expectRevert(Bank.InsufficientReserveLiquidity.selector);
+        bank.bridgeReserve(42, 100e6);
+    }
+
+    function test_bridgeReserveRevertsWhenAdapterNotSet() public {
+        _depositReserve(100e6);
+        vm.prank(admin);
+        bank.setMaxReserveRebalanceAmount(100e6);
+        vm.prank(admin);
+        bank.setAllowlistedDestChain(42, true);
+        vm.prank(admin);
+        bank.setReserveDestination(42, address(bank));
+
+        vm.prank(reserveRebalancer);
+        vm.expectRevert(Bank.ReserveBridgeNotSet.selector);
+        bank.bridgeReserve(42, 100e6);
     }
 
     // ── UUPS upgrade ────────────────────────────────────────────────────

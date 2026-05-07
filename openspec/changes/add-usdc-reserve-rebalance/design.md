@@ -53,6 +53,12 @@ Each bridge produces a `messageId` (CCTP attestation id, custom adapter id, etc.
 
 Reserve rebalance respects `RouteReceiver` chain activation. Cannot bridge to or from an inactive chain. Decommissioned chains (separate change) drain via this mechanism but in a one-shot, governance-triggered mode.
 
+### 6. Reserve token and destination registry
+
+`bridgeReserve(uint64 destChainId, uint256 amount)` intentionally does not accept a token address. The Bank Contract therefore stores a canonical `reserveToken` for the USDC reserve; governance may update it only to an already-allowed token. The first allowed token initializes `reserveToken` for backwards compatibility with existing deployment flow.
+
+Outbound reserve bridging also needs the destination Bank/reserve address. The Bank Contract stores a governance-managed `reserveDestinations[destChainId]` registry and requires the destination chain to be allowlisted before bridging. Treasury continues to use `RouteReceiver` activation state when planning operations; the on-chain allowlist/registry is the local execution gate.
+
 ## Decisions
 
 - **Tempo bridge: custom adapter using LayerZero or Wormhole, gated by a multisig.** No public CCTP support on Tempo. The custom adapter implements `IReserveBridge` against the chosen messaging protocol; a multisig signs each release on the destination side as the trust anchor. Concrete protocol choice (LayerZero vs. Wormhole) and adapter implementation are tracked as a sub-task — they require their own design pass, but the path is decided.
