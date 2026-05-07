@@ -6,6 +6,13 @@ export const typeDefs = /* GraphQL */ `
     status: String!
     tempoAddress: String!
     username: String!
+    """Hot-path destination chain (EIP-155 id). Only set on send-preview queries."""
+    destChainId: String
+  }
+
+  type RecipientRouting {
+    tempoAddress: String!
+    destChainId: String!
   }
 
   type Credential {
@@ -49,6 +56,9 @@ export const typeDefs = /* GraphQL */ `
 
     """Resolve a username to a user profile — used when sending funds (requires auth)"""
     resolveUsername(username: String!): User!
+
+    """Resolve a raw Tempo address to hot-path routing (requires auth)"""
+    resolveRecipientRouting(tempoAddress: String!): RecipientRouting!
   }
 
   type Mutation {
@@ -58,6 +68,7 @@ export const typeDefs = /* GraphQL */ `
       credentialId: String!
       publicKey: String!
       displayName: String
+      chainId: Int
     ): AuthPayload!
 
     """Add a new passkey credential to the current user's account (requires auth)"""
@@ -68,7 +79,7 @@ export const typeDefs = /* GraphQL */ `
     The frontend must have already verified the passkey challenge before calling this.
     Returns a JWT session token.
     """
-    authenticate(credentialId: String!): AuthPayload!
+    authenticate(credentialId: String!, chainId: Int): AuthPayload!
 
     """Set or update the authenticated user's username (requires auth)"""
     setUsername(username: String!): User!

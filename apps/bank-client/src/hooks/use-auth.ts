@@ -12,6 +12,7 @@ import {
   type RegisterUserResponse,
   type AuthenticateResponse,
 } from '~/queries/auth';
+import { env } from '~/config/env';
 
 export function createAuth() {
   const [user, setUser] = createSignal<User | null>(null);
@@ -53,6 +54,7 @@ export function createAuth() {
         credentialId: credential.credentialId,
         publicKey: publicKeyHex,
         displayName,
+        chainId: env.tempoChainId,
       });
 
       // 5. Store JWT
@@ -80,6 +82,7 @@ export function createAuth() {
       // 2. Authenticate — the BFF looks up the user by credentialId
       const data = await gql<AuthenticateResponse>(AUTHENTICATE_MUTATION, {
         credentialId: assertion.credentialId,
+        chainId: env.tempoChainId,
       });
 
       // 3. Store JWT

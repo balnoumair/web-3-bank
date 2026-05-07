@@ -12,7 +12,7 @@ use super::sqlx_to_domain;
 use crate::domain::entities::{User, UserStatus};
 use crate::domain::errors::DomainError;
 use crate::domain::repository::UserRepository;
-use crate::domain::validation::Username;
+use crate::domain::validation::{TempoAddress, Username};
 
 #[derive(Debug, sqlx::FromRow)]
 struct UserRow {
@@ -118,6 +118,50 @@ impl UserRepository for PgUserRepository {
         .await
         .map_err(sqlx_to_domain)?;
         Ok(row.map(User::from))
+    }
+
+    async fn get_home_chain_by_tempo_address(
+        &self,
+        tempo_address: &TempoAddress,
+    ) -> Result<Option<i64>, DomainError> {
+        let row = sqlx::query_scalar::<_, Option<i64>>(
+            "SELECT u.home_chain FROM users.users u
+             INNER JOIN users.credentials c ON c.user_id = u.id
+             WHERE c.tempo_address = $1 AND c.revoked_at IS NULL
+             LIMIT 1",
+        )
+        .bind(tempo_address.as_str())
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(sqlx_to_domain)?;
+
+        Ok(match row {
+            None | Some(None) => None,
+            Some(Some(v)) => Some(v),
+        })
+    }
+
+    async fn set_home_chain_if_unset(
+        &self,
+        tempo_address: &TempoAddress,
+        chain_id: i64,
+    ) -> Result<(), DomainError> {
+        sqlx::query(
+            "UPDATE users.users u
+             SET home_chain = $1, updated_at = now()
+             WHERE u.id = (
+               SELECT c.user_id FROM users.credentials c
+               WHERE c.tempo_address = $2 AND c.revoked_at IS NULL
+               LIMIT 1
+             )
+             AND u.home_chain IS NULL",
+        )
+        .bind(chain_id)
+        .bind(tempo_address.as_str())
+        .execute(&self.pool)
+        .await
+        .map_err(sqlx_to_domain)?;
+        Ok(())
     }
 }
 

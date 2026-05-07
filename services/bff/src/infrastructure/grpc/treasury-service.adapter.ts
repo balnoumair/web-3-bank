@@ -99,6 +99,18 @@ export class GrpcTreasuryServiceAdapter implements ITreasuryService {
       );
     });
   }
+
+  isChainActive(chainId: number): Promise<boolean> {
+    return new Promise((resolve, reject) => {
+      this.client.isChainActive(
+        { chainId: chainId.toString() },
+        (err: grpc.ServiceError | null, res: { active: boolean }) => {
+          if (err) reject(grpcToError(err));
+          else resolve(res.active);
+        }
+      );
+    });
+  }
 }
 
 function grpcToError(err: grpc.ServiceError): Error {

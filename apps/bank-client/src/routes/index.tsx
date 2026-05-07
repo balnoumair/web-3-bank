@@ -61,7 +61,11 @@ export default function Home() {
         return withdraw.mutateAsync({ amount: params.amount });
       case "send":
         if (!params.to) throw new Error("Recipient required");
-        return transfer.mutateAsync({ to: params.to, amount: params.amount });
+        return transfer.mutateAsync({
+          to: params.to,
+          amount: params.amount,
+          destChainId: params.destChainId,
+        });
     }
   };
 

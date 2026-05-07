@@ -2,7 +2,13 @@ import { createSignal, Show, type Component } from 'solid-js';
 import { parseAmount, formatUsd } from '~/lib/format';
 import { showToast } from './Toast';
 import { gql } from '~/lib/graphql';
-import { RESOLVE_USERNAME_QUERY, type ResolveUsernameResponse } from '~/queries/auth';
+import { env } from '~/config/env';
+import {
+  RESOLVE_USERNAME_QUERY,
+  RESOLVE_RECIPIENT_ROUTING_QUERY,
+  type ResolveUsernameResponse,
+  type ResolveRecipientRoutingResponse,
+} from '~/queries/auth';
 
 export type TransactionType = 'deposit' | 'withdraw' | 'send';
 
@@ -13,6 +19,7 @@ interface TransactionModalProps {
   onSubmit: (params: {
     amount: bigint;
     to?: `0x${string}`;
+    destChainId: string;
   }) => Promise<`0x${string}`>;
 }
 
@@ -51,19 +58,34 @@ const TransactionModal: Component<TransactionModalProps> = (props) => {
       const parsedAmount = parseAmount(amount());
 
       let to: `0x${string}` | undefined;
+      let destChainId = String(env.tempoChainId);
       if (needsRecipient()) {
         const raw = recipient().trim();
         if (raw.startsWith('0x')) {
-          to = raw as `0x${string}`;
+          const addr = raw as `0x${string}`;
+          const routing = await gql<ResolveRecipientRoutingResponse>(
+            RESOLVE_RECIPIENT_ROUTING_QUERY,
+            { tempoAddress: addr }
+          );
+          to = routing.resolveRecipientRouting.tempoAddress as `0x${string}`;
+          destChainId = routing.resolveRecipientRouting.destChainId;
         } else {
           // Strip leading @ if present, then resolve username → address.
           const uname = raw.startsWith('@') ? raw.slice(1) : raw;
           const data = await gql<ResolveUsernameResponse>(RESOLVE_USERNAME_QUERY, { username: uname });
           to = data.resolveUsername.tempoAddress as `0x${string}`;
+          destChainId =
+            data.resolveUsername.destChainId != null && data.resolveUsername.destChainId !== ''
+              ? String(data.resolveUsername.destChainId)
+              : String(env.tempoChainId);
         }
       }
 
-      const txHash = await props.onSubmit({ amount: parsedAmount, to });
+      const txHash = await props.onSubmit({
+        amount: parsedAmount,
+        to,
+        destChainId: needsRecipient() ? destChainId : String(env.tempoChainId),
+      });
 
       showToast({
         type: 'success',

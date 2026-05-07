@@ -1,4 +1,5 @@
 import type { IUserService, UserRecord } from "../domain/ports/user-service.js";
+import { resolveDestChainId } from "../domain/send-routing.js";
 
 import type {
   ITreasuryService,
@@ -7,6 +8,41 @@ import type {
 } from "../domain/ports/treasury-service.js";
 
 export type QueryUseCases = ReturnType<typeof makeQueryUseCases>;
+
+async function resolveHotPathDestChainId(
+  userService: IUserService,
+  treasuryService: ITreasuryService,
+  recipientTempoAddress: string,
+  senderChainId: number
+): Promise<string> {
+  let home: bigint | undefined;
+  try {
+    const hc = await userService.getUserHomeChain(recipientTempoAddress);
+    if (hc.found) {
+      home = BigInt(hc.chainId);
+    }
+  } catch (e) {
+    console.warn("user-service unavailable for home-chain routing:", e);
+    return String(senderChainId);
+  }
+
+  let homeActive = true;
+  if (home !== undefined) {
+    try {
+      homeActive = await treasuryService.isChainActive(Number(home));
+    } catch (e) {
+      console.warn("treasury IsChainActive failed — falling back to same-chain:", e);
+      homeActive = false;
+    }
+  }
+
+  const dest = resolveDestChainId({
+    senderChainId: BigInt(senderChainId),
+    recipientHomeChainId: home,
+    recipientHomeChainActive: homeActive,
+  });
+  return dest.toString();
+}
 
 /**
  * Factory that composes query use cases from driven ports.
@@ -17,8 +53,10 @@ export function makeQueryUseCases(
   treasuryService: ITreasuryService
 ) {
   return {
-    getMe: (address: string): Promise<UserRecord> =>
-      userService.getUserByAddress(address),
+    getMe: async (address: string): Promise<UserRecord> => {
+      const u = await userService.getUserByAddress(address);
+      return { ...u, destChainId: null };
+    },
 
     getBalance: (address: string): Promise<string> =>
       treasuryService.getBalance(address),
@@ -31,7 +69,36 @@ export function makeQueryUseCases(
       limit: number
     ): Promise<Transfer[]> => treasuryService.getRecentTransfers(address, limit),
 
-    resolveUsername: (username: string): Promise<UserRecord> =>
-      userService.getUserByUsername(username),
+    resolveUsername: async (
+      username: string,
+      senderChainId: number
+    ): Promise<UserRecord> => {
+      const u = await userService.getUserByUsername(username);
+      const destChainId = await resolveHotPathDestChainId(
+        userService,
+        treasuryService,
+        u.tempoAddress,
+        senderChainId
+      );
+      return { ...u, destChainId };
+    },
+
+    resolveRecipientRouting: async (
+      tempoAddress: string,
+      senderChainId: number
+    ): Promise<{ tempoAddress: string; destChainId: string }> => {
+      const trimmed = tempoAddress.trim();
+      if (!/^0x[0-9a-fA-F]{40}$/.test(trimmed)) {
+        throw new Error("Invalid Tempo address");
+      }
+      const normalized = trimmed.toLowerCase();
+      const destChainId = await resolveHotPathDestChainId(
+        userService,
+        treasuryService,
+        normalized,
+        senderChainId
+      );
+      return { tempoAddress: normalized, destChainId };
+    },
   };
 }

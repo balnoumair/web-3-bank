@@ -33,12 +33,14 @@ export const REGISTER_USER_MUTATION = `
     $credentialId: String!
     $publicKey: String!
     $displayName: String
+    $chainId: Int
   ) {
     registerUser(
       address: $address
       credentialId: $credentialId
       publicKey: $publicKey
       displayName: $displayName
+      chainId: $chainId
     ) {
       token
       userId
@@ -51,8 +53,8 @@ export interface RegisterUserResponse {
 }
 
 export const AUTHENTICATE_MUTATION = `
-  mutation Authenticate($credentialId: String!) {
-    authenticate(credentialId: $credentialId) {
+  mutation Authenticate($credentialId: String!, $chainId: Int) {
+    authenticate(credentialId: $credentialId, chainId: $chainId) {
       token
       userId
     }
@@ -85,10 +87,24 @@ export const RESOLVE_USERNAME_QUERY = `
       userId
       tempoAddress
       username
+      destChainId
     }
   }
 `;
 
 export interface ResolveUsernameResponse {
-  resolveUsername: User;
+  resolveUsername: User & { destChainId?: string | null };
+}
+
+export const RESOLVE_RECIPIENT_ROUTING_QUERY = `
+  query ResolveRecipientRouting($tempoAddress: String!) {
+    resolveRecipientRouting(tempoAddress: $tempoAddress) {
+      tempoAddress
+      destChainId
+    }
+  }
+`;
+
+export interface ResolveRecipientRoutingResponse {
+  resolveRecipientRouting: { tempoAddress: string; destChainId: string };
 }

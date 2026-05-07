@@ -7,6 +7,7 @@ import type {
   UserRecord,
   CreateUserInput,
   AddCredentialInput,
+  HomeChainResult,
 } from "../../domain/ports/user-service.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -103,6 +104,25 @@ export class GrpcUserServiceAdapter implements IUserService {
         (err: grpc.ServiceError | null, res: UserRecord) => {
           if (err) reject(grpcToError(err));
           else resolve(res);
+        }
+      );
+    });
+  }
+
+  getUserHomeChain(tempoAddress: string): Promise<HomeChainResult> {
+    return new Promise((resolve, reject) => {
+      this.client.getUserHomeChain(
+        { tempoAddress },
+        (
+          err: grpc.ServiceError | null,
+          res: { found: boolean; chainId: string | number }
+        ) => {
+          if (err) reject(grpcToError(err));
+          else if (res.found) {
+            resolve({ found: true, chainId: String(res.chainId) });
+          } else {
+            resolve({ found: false });
+          }
         }
       );
     });

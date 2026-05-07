@@ -65,6 +65,12 @@ pub struct Config {
     #[serde(default = "default_cold_path_poll_secs")]
     pub cold_path_poll_secs: u64,
 
+    /// Optional `host:port` for user-service gRPC (e.g. `127.0.0.1:50051`).
+    /// When set, the treasury indexes `Deposited` events and calls
+    /// `SetUserHomeChain` so first-deposit home routing is recorded.
+    #[serde(default)]
+    pub user_service_addr: Option<String>,
+
     /// Seconds before an in-flight CCIP rebalance requires manual review.
     /// Default: 1800 (30 minutes).
     #[serde(default = "default_cold_path_stuck_message_timeout_secs")]

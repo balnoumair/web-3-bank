@@ -4,10 +4,16 @@ mod db;
 pub mod domain;
 mod error;
 mod eth;
+mod home_chain;
 mod hot_path;
 mod pool_manager;
 mod server;
 mod watcher;
+
+/// Generated user-service gRPC client (for `SetUserHomeChain`).
+pub mod user_pb {
+    tonic::include_proto!("user");
+}
 
 /// Generated gRPC types and server traits from proto/treasury.proto.
 pub mod proto {
@@ -25,6 +31,7 @@ use tracing::info;
 
 use crate::cold_path::ColdPath;
 use crate::config::Config;
+use crate::home_chain::HomeChainIndexer;
 use crate::hot_path::HotPath;
 use crate::pool_manager::PoolManager;
 use crate::proto::treasury::treasury_service_server::TreasuryServiceServer;
@@ -95,6 +102,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Arc::clone(&pool_manager).spawn_background();
     Arc::clone(&watcher).spawn_background();
     Arc::clone(&cold_path).spawn_background();
+
+    if let Some(ref user_ep) = cfg.user_service_addr {
+        HomeChainIndexer::new(Arc::clone(&cfg), http.clone(), user_ep.clone()).spawn_background();
+    } else {
+        tracing::info!("home_chain: USER_SERVICE_ADDR not set — deposit indexer disabled");
+    }
 
     // ── 5. Bind gRPC server ───────────────────────────────────────────────────
     let addr: SocketAddr = format!("0.0.0.0:{}", cfg.grpc_port).parse()?;

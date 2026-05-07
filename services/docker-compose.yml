@@ -24,8 +24,11 @@ services:
       DATABASE_URL: ${TREASURY_DATABASE_URL}
       GRPC_PORT: 50052
       RELAYER_KEY_PATH: /run/secrets/relayer.key
+      USER_SERVICE_ADDR: "user-service:50051"
     ports:
       - "50052:50052"
+    depends_on:
+      - user-service
     networks:
       - internal
 

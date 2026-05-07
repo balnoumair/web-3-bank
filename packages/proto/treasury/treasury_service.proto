@@ -16,6 +16,9 @@ service TreasuryService {
   // User-facing queries
   rpc GetBalance(GetBalanceRequest) returns (GetBalanceResponse);
   rpc GetRecentTransfers(GetRecentTransfersRequest) returns (GetRecentTransfersResponse);
+
+  // RouteReceiver-derived activation set (same view the hot-path relayer uses).
+  rpc IsChainActive(IsChainActiveRequest) returns (IsChainActiveResponse);
 }
 
 message HealthCheckRequest {}
@@ -58,3 +61,10 @@ message TransferRecord {
   string created_at        = 8;
 }
 message GetRecentTransfersResponse { repeated TransferRecord transfers = 1; }
+
+message IsChainActiveRequest {
+  uint64 chain_id = 1;
+}
+message IsChainActiveResponse {
+  bool active = 1;
+}

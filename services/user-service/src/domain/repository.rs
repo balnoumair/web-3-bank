@@ -27,6 +27,19 @@ pub trait UserRepository: Send + Sync {
 
     /// Look up a user by username (case-insensitive). Returns `None` if not found.
     async fn get_by_username(&self, username: &Username) -> Result<Option<User>, DomainError>;
+
+    /// Stored `home_chain` for a Tempo address (via active credential), if set.
+    async fn get_home_chain_by_tempo_address(
+        &self,
+        tempo_address: &TempoAddress,
+    ) -> Result<Option<i64>, DomainError>;
+
+    /// Sets `home_chain` once (first deposit). No-op if unknown user or already set.
+    async fn set_home_chain_if_unset(
+        &self,
+        tempo_address: &TempoAddress,
+        chain_id: i64,
+    ) -> Result<(), DomainError>;
 }
 
 #[async_trait]

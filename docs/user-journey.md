@@ -88,7 +88,8 @@ Bob's Browser                    Tempo Chain                    Treasury Service
 
 **What Bob does:** FaceID prompt → scans face.
 
-**What happens internally:**
+**What happens internally:** The BFF resolves Alice’s routing (same as step 4, but when her home chain matches Bob’s current chain the client signs a plain **SyncUSD `transfer`**; if her home were elsewhere, Bob would sign **`transferHotPath`** instead).
+
 ```
 Bob's Browser                    Tempo Chain
     │                                │
@@ -120,10 +121,13 @@ Charlie is on Base. Bob doesn't know this. Bob doesn't care.
 
 **What Bob does:** FaceID prompt → scans face.
 
-**What happens internally:**
+**What happens internally:** Before Bob signs, the BFF resolves Charlie’s **home chain** from the User Service (set on Charlie’s first deposit, pushed by Treasury). The GraphQL response includes the `destChainId` the wallet must pass into `transferHotPath`. If Charlie has no profile yet, his home chain is unknown, or RouteReceiver marks his home chain inactive, the BFF falls back to Bob’s current chain so delivery is never blocked.
+
 ```
 Bob's Browser          Tempo Chain              Treasury Service           Base Chain
     │                      │                         │                        │
+    ├─ BFF: resolve        │                         │                        │
+    │  username + routing  │                         │                        │
     ├─ wagmi builds        │                         │                        │
     │  transferHotPath()   │                         │                        │
     │  tx on Bank Contract │                         │                        │
