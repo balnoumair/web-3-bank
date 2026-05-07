@@ -73,11 +73,29 @@ pub async fn fetch_pool_depth(
     bank_addr: &str,
     selector: &[u8; 4],
 ) -> Option<U256> {
+    fetch_u256_view(http, rpc_url, bank_addr, selector).await
+}
+
+pub async fn fetch_max_rebalance_amount(
+    http: &reqwest::Client,
+    rpc_url: &str,
+    bank_addr: &str,
+    selector: &[u8; 4],
+) -> Option<U256> {
+    fetch_u256_view(http, rpc_url, bank_addr, selector).await
+}
+
+async fn fetch_u256_view(
+    http: &reqwest::Client,
+    rpc_url: &str,
+    contract_addr: &str,
+    selector: &[u8; 4],
+) -> Option<U256> {
     let call_data = format!("0x{}", bytes_to_hex(selector));
     let body = serde_json::json!({
         "jsonrpc": "2.0",
         "method": "eth_call",
-        "params": [{"to": bank_addr, "data": call_data}, "latest"],
+        "params": [{"to": contract_addr, "data": call_data}, "latest"],
         "id": 1
     });
     let resp: serde_json::Value = http
