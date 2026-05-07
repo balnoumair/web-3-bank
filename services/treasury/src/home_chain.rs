@@ -74,9 +74,8 @@ impl HomeChainIndexer {
                 .collect();
 
             for (chain_id, rpc_url, bank_addr) in chains {
-                let to_block = match eth::fetch_block_number(&self.http, &rpc_url).await {
-                    Some(b) => b,
-                    None => continue,
+                let Some(to_block) = eth::fetch_block_number(&self.http, &rpc_url).await else {
+                    continue;
                 };
 
                 let scan_from = match last_block.get(&chain_id) {
@@ -87,12 +86,7 @@ impl HomeChainIndexer {
 
                 let topic = format!("{}", self.deposited_topic);
                 let logs = eth::fetch_logs(
-                    &self.http,
-                    &rpc_url,
-                    &bank_addr,
-                    &topic,
-                    scan_from,
-                    to_block,
+                    &self.http, &rpc_url, &bank_addr, &topic, scan_from, to_block,
                 )
                 .await;
 

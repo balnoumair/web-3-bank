@@ -140,10 +140,7 @@ impl HotPath {
     /// Whether `chain_id` is in the active set derived from RouteReceiver
     /// (seeded with all configured chains until the first activation publish).
     pub async fn is_chain_active(&self, chain_id: u64) -> bool {
-        self.active_chains
-            .read()
-            .await
-            .contains(&ChainId(chain_id))
+        self.active_chains.read().await.contains(&ChainId(chain_id))
     }
 
     // ── Background loops ──────────────────────────────────────────────────────
