@@ -20,6 +20,20 @@ Reserve rebalance and SyncUSD pool rebalance (cold path) SHALL be operated as in
 
 Every reserve bridge attempt SHALL be recorded in the `treasury.reserve_ops` table with source chain, destination chain, amount, bridge type, bridge `messageId`, status (`initiated`, `completed`, `failed`), and any failure reason. Recording SHALL occur regardless of outcome.
 
+#### Scenario: Failed reserve bridge is still audited
+
+- **WHEN** Treasury attempts a reserve bridge from Tempo to Base
+- **AND** the bridge call fails before completion
+- **THEN** Treasury SHALL record a `treasury.reserve_ops` row with status `failed`
+- **AND** the row SHALL include the source chain, destination chain, amount, bridge type, correlation id or bridge `messageId`, and failure reason
+
 ### Requirement: Reserve rebalance respects per-bridge cap
 
 The Treasury Service SHALL split any logical reserve bridge whose total amount exceeds the destination Bank Contract's `maxReserveRebalanceAmount` into multiple sequential operations, each within the cap. The on-chain cap is authoritative.
+
+#### Scenario: Treasury splits a reserve rebalance above the cap
+
+- **WHEN** Base needs 300,000 USDC
+- **AND** the source Bank Contract's `maxReserveRebalanceAmount` is 100,000 USDC
+- **THEN** Treasury SHALL plan three sequential `bridgeReserve` calls of 100,000 USDC or less
+- **AND** Treasury SHALL NOT submit a single call above the on-chain cap

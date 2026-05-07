@@ -2,9 +2,9 @@
 
 ## 1. On-chain interface (`packages/onchain`)
 
-- [ ] Define `IReserveBridge` interface:
-  - [ ] `bridgeOut(uint64 destChainId, uint256 amount, address destReserve) returns (bytes32 messageId)`
-  - [ ] `bridgeIn(...)` callback (signature per bridge type — abstract in interface).
+- [x] Define `IReserveBridge` interface:
+  - [x] `bridgeOut(uint64 destChainId, uint256 amount, address destReserve) returns (bytes32 messageId)`
+  - [x] `bridgeIn(...)` callback (signature per bridge type — abstract in interface).
 - [ ] Implement `CCTPReserveBridge` adapter for CCTP-supported chains:
   - [ ] Wraps Circle's `TokenMessenger.depositForBurn` and `MessageTransmitter.receiveMessage`.
   - [ ] Tests against forked Base/Arbitrum.
@@ -17,36 +17,36 @@
 
 ## 2. On-chain Bank Contract (`packages/onchain`)
 
-- [ ] Add `RESERVE_REBALANCER_ROLE` constant.
-- [ ] Add storage:
-  - [ ] `reserveBridge` (IReserveBridge)
-  - [ ] `maxReserveRebalanceAmount` (uint256)
-  - [ ] `processedReserveMessages` (mapping bytes32 => bool) for idempotency on inbound.
-- [ ] Admin functions (governance/admin role):
-  - [ ] `setReserveBridge(IReserveBridge)`
-  - [ ] `setMaxReserveRebalanceAmount(uint256)`
-- [ ] Add `bridgeReserve(uint64 destChainId, uint256 amount)`:
-  - [ ] Requires `RESERVE_REBALANCER_ROLE`.
-  - [ ] Reverts if `amount > maxReserveRebalanceAmount`.
-  - [ ] Reverts if `destChainId` is inactive in `RouteReceiver`.
-  - [ ] Reverts if reserve depth < amount.
-  - [ ] Approves `reserveBridge` to pull USDC.
-  - [ ] Calls `reserveBridge.bridgeOut(...)`, captures `messageId`.
-  - [ ] Emits `ReserveBridgeInitiated(destChainId, amount, messageId, bridgeType)`.
-- [ ] Add inbound handler called by `reserveBridge`:
-  - [ ] Verifies caller is the registered `reserveBridge`.
-  - [ ] Reverts on already-processed `messageId`.
-  - [ ] Marks `messageId` processed.
-  - [ ] Adds USDC to reserve (no-op since the bridge already minted/released into the contract; just records the credit).
-  - [ ] Emits `ReserveBridgeCompleted(srcChainId, amount, messageId)`.
-- [ ] Add `reserveDepth()` view returning current USDC reserve balance.
-- [ ] Foundry tests:
-  - [ ] Happy path round-trip with mock adapter.
-  - [ ] Unauthorized caller: reverts.
-  - [ ] Amount > cap: reverts.
-  - [ ] Inactive destination: reverts.
-  - [ ] Replay: reverts on second delivery.
-  - [ ] Adapter not set: reverts cleanly.
+- [x] Add `RESERVE_REBALANCER_ROLE` constant.
+- [x] Add storage:
+  - [x] `reserveBridge` (IReserveBridge)
+  - [x] `maxReserveRebalanceAmount` (uint256)
+  - [x] `processedReserveMessages` (mapping bytes32 => bool) for idempotency on inbound.
+- [x] Admin functions (governance/admin role):
+  - [x] `setReserveBridge(IReserveBridge)`
+  - [x] `setMaxReserveRebalanceAmount(uint256)`
+- [x] Add `bridgeReserve(uint64 destChainId, uint256 amount)`:
+  - [x] Requires `RESERVE_REBALANCER_ROLE`.
+  - [x] Reverts if `amount > maxReserveRebalanceAmount`.
+  - [x] Reverts if `destChainId` is inactive in `RouteReceiver`.
+  - [x] Reverts if reserve depth < amount.
+  - [x] Approves `reserveBridge` to pull USDC.
+  - [x] Calls `reserveBridge.bridgeOut(...)`, captures `messageId`.
+  - [x] Emits `ReserveBridgeInitiated(destChainId, amount, messageId, bridgeType)`.
+- [x] Add inbound handler called by `reserveBridge`:
+  - [x] Verifies caller is the registered `reserveBridge`.
+  - [x] Reverts on already-processed `messageId`.
+  - [x] Marks `messageId` processed.
+  - [x] Adds USDC to reserve (no-op since the bridge already minted/released into the contract; just records the credit).
+  - [x] Emits `ReserveBridgeCompleted(srcChainId, amount, messageId)`.
+- [x] Add `reserveDepth()` view returning current USDC reserve balance.
+- [x] Foundry tests:
+  - [x] Happy path round-trip with mock adapter.
+  - [x] Unauthorized caller: reverts.
+  - [x] Amount > cap: reverts.
+  - [x] Inactive destination: reverts.
+  - [x] Replay: reverts on second delivery.
+  - [x] Adapter not set: reverts cleanly.
 
 ## 3. Treasury Service (`services/treasury`)
 
@@ -62,7 +62,7 @@
 
 ## 4. CRE / RouteReceiver
 
-- [ ] No changes. Reserve rebalance reads existing activation state.
+- [x] No changes. Reserve rebalance reads existing activation state.
 
 ## 5. Configuration & deployment
 
