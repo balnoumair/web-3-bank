@@ -10,9 +10,20 @@ Represent user balances as on-chain `SyncUSD` tokens, 1:1 backed by externally-h
 
 User balances SHALL be denominated in `SyncUSD`, a stablecoin issued by the bank and backed 1:1 by USDC held in reserve by the Bank Contract on each active chain. The total `SyncUSD` supply across all chains SHALL equal the total underlying USDC reserves.
 
+#### Scenario: Total SyncUSD supply matches total USDC reserves
+
+- **WHEN** the sum of `SyncUSD` total supply across all active chains is computed
+- **THEN** it SHALL equal the sum of underlying USDC reserves held by every Bank Contract
+
 ### Requirement: One Bank Contract per active chain
 
 Each active chain SHALL host exactly one Bank Contract. The Bank Contract SHALL hold the chain's underlying stablecoin reserve and SHALL manage the chain's local `SyncUSD` liquidity pool.
+
+#### Scenario: A chain in the active set has exactly one Bank Contract
+
+- **WHEN** a chain is in the active set maintained by `RouteReceiver.sol`
+- **THEN** exactly one Bank Contract SHALL be deployed on that chain
+- **AND** that contract SHALL hold the chain's underlying reserve and manage its local `SyncUSD` pool
 
 ### Requirement: Deposit mints SyncUSD against escrowed USDC
 
@@ -40,6 +51,70 @@ When a user withdraws, the Bank Contract SHALL burn the user's `SyncUSD` and rel
 
 A transfer between two users on the same chain SHALL execute as a standard ERC-20 `transfer()` of `SyncUSD` between their addresses. The Bank Contract SHALL NOT be involved.
 
+#### Scenario: Alice sends 100 SyncUSD to Bob on the same chain
+
+- **WHEN** Alice calls `transfer(Bob, 100)` on the `SyncUSD` ERC-20 contract on Tempo
+- **THEN** 100 `SyncUSD` SHALL move directly from Alice's address to Bob's address
+- **AND** the Bank Contract SHALL NOT be invoked
+
 ### Requirement: Mint and burn are restricted
 
 `SyncUSD.mint` and `SyncUSD.burn` SHALL be callable only by the Bank Contract on that chain and the CCIP Token Pool. All other callers SHALL be rejected.
+
+#### Scenario: Unauthorized address attempts to mint SyncUSD
+
+- **WHEN** an address that is neither the Bank Contract nor the CCIP Token Pool calls `SyncUSD.mint`
+- **THEN** the call SHALL revert
+
+#### Scenario: Bank Contract mints SyncUSD on deposit
+
+- **WHEN** the Bank Contract calls `SyncUSD.mint` as part of a deposit flow
+- **THEN** the mint SHALL succeed
+
+### Requirement: Rebalance moves SyncUSD pool liquidity across chains
+
+Bank Contracts SHALL expose a permissioned `rebalance(uint64 destChainId, uint256 amount)` function. When called, the contract SHALL burn `amount` SyncUSD from its local liquidity pool and SHALL send a CCIP message instructing the destination chain's Bank Contract to mint the same amount into its local pool. This function SHALL be the only mechanism by which SyncUSD pool liquidity moves between chains under normal operation.
+
+The function SHALL NOT move USDC reserves. Underlying reserves remain on the chain where they were deposited.
+
+#### Scenario: Treasury rebalances 50,000 SyncUSD from Tempo to Base
+
+- **WHEN** the Treasury Service calls `rebalance(BaseChainId, 50000)` on the Tempo Bank Contract
+- **THEN** 50,000 SyncUSD SHALL be burned from the Tempo pool
+- **AND** a CCIP message SHALL be dispatched to the Base Bank Contract
+- **AND** a `RebalanceInitiated` event SHALL be emitted carrying the CCIP `messageId`
+- **AND** upon CCIP delivery, the Base Bank Contract SHALL mint 50,000 SyncUSD into its local pool
+- **AND** the Base Bank Contract SHALL emit a `RebalanceCompleted` event carrying the same `messageId`
+
+### Requirement: Rebalance is restricted, capped, and idempotent
+
+`rebalance` SHALL be callable only by an address holding `REBALANCER_ROLE`. `REBALANCER_ROLE` SHALL be distinct from `RELAYER_ROLE`. Each call SHALL be rejected if `amount` exceeds the contract's configured `maxRebalanceAmount`. The destination chain's Bank Contract SHALL reject any inbound CCIP message whose `messageId` it has already processed.
+
+#### Scenario: Unauthorized rebalance attempt
+
+- **WHEN** an address without `REBALANCER_ROLE` calls `rebalance`
+- **THEN** the call SHALL revert
+
+#### Scenario: Rebalance amount exceeds cap
+
+- **WHEN** Treasury calls `rebalance(destChainId, amount)` with `amount > maxRebalanceAmount`
+- **THEN** the call SHALL revert without burning any SyncUSD
+
+#### Scenario: Replayed CCIP delivery
+
+- **WHEN** the destination Bank Contract receives a CCIP message whose `messageId` it has already processed
+- **THEN** the contract SHALL revert without minting
+
+### Requirement: Rebalance respects CCIP allowlists
+
+The Bank Contract SHALL maintain an allowlist of permitted outbound destination chain IDs and an allowlist of permitted inbound source contracts (keyed by source chain ID and source contract address). Outbound `rebalance` calls to non-allowlisted destinations SHALL revert. Inbound CCIP messages from non-allowlisted sources SHALL revert.
+
+#### Scenario: Outbound rebalance to a non-allowlisted destination
+
+- **WHEN** an address with `REBALANCER_ROLE` calls `rebalance(destChainId, amount)` with a `destChainId` not in the outbound allowlist
+- **THEN** the call SHALL revert without burning any `SyncUSD`
+
+#### Scenario: Inbound CCIP message from a non-allowlisted source
+
+- **WHEN** the Bank Contract receives a CCIP message whose `(srcChainId, srcContract)` pair is not in the inbound allowlist
+- **THEN** the receive handler SHALL revert without minting

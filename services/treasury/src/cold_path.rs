@@ -67,6 +67,8 @@ pub struct ColdPath {
     nonce_cache: Arc<Mutex<HashMap<ChainId, u64>>>,
     /// 4-byte selector for `poolDepth()`
     pool_depth_selector: [u8; 4],
+    /// 4-byte selector for `maxRebalanceAmount()`
+    max_rebalance_amount_selector: [u8; 4],
     /// 4-byte selector for `rebalance(uint64,uint256)`
     rebalance_selector: [u8; 4],
     /// keccak256("ActivationPublished(string,string,string,uint256,string,string,uint256)")
@@ -75,6 +77,8 @@ pub struct ColdPath {
     max_wei_per_op: Option<U256>,
     /// ETH (in wei) to include as `msg.value` for CCIP fees.
     ccip_fee_wei: U256,
+    /// Duration before a submitted CCIP rebalance needs operator review.
+    stuck_message_timeout: Duration,
     /// How often the monitor loop runs.
     poll_interval: Duration,
 }
@@ -94,6 +98,10 @@ impl ColdPath {
         let pool_depth_hash = keccak256(b"poolDepth()");
         let mut pool_depth_selector = [0u8; 4];
         pool_depth_selector.copy_from_slice(&pool_depth_hash[..4]);
+
+        let max_rebalance_amount_hash = keccak256(b"maxRebalanceAmount()");
+        let mut max_rebalance_amount_selector = [0u8; 4];
+        max_rebalance_amount_selector.copy_from_slice(&max_rebalance_amount_hash[..4]);
 
         let rebalance_hash = keccak256(b"rebalance(uint64,uint256)");
         let mut rebalance_selector = [0u8; 4];
@@ -119,6 +127,8 @@ impl ColdPath {
 
         let ccip_fee_wei = config.ccip_fee_wei.parse::<U256>().unwrap_or(U256::ZERO);
 
+        let stuck_message_timeout =
+            Duration::from_secs(config.cold_path_stuck_message_timeout_secs);
         let poll_interval = Duration::from_secs(config.cold_path_poll_secs);
 
         Arc::new(Self {
@@ -130,10 +140,12 @@ impl ColdPath {
             relayer_address,
             nonce_cache: Arc::new(Mutex::new(HashMap::new())),
             pool_depth_selector,
+            max_rebalance_amount_selector,
             rebalance_selector,
             activation_topic,
             max_wei_per_op,
             ccip_fee_wei,
+            stuck_message_timeout,
             poll_interval,
         })
     }
@@ -151,6 +163,7 @@ impl ColdPath {
     async fn monitor_loop(self: Arc<Self>) {
         info!(
             interval_secs = self.poll_interval.as_secs(),
+            stuck_message_timeout_secs = self.stuck_message_timeout.as_secs(),
             "cold_path: rebalance monitor started"
         );
         loop {
@@ -175,12 +188,9 @@ impl ColdPath {
         info!("cold_path: route receiver polling started");
 
         loop {
-            let to_block = match eth::fetch_block_number(&self.http, &rpc_url).await {
-                Some(b) => b,
-                None => {
-                    tokio::time::sleep(ROUTE_RECEIVER_POLL_INTERVAL).await;
-                    continue;
-                }
+            let Some(to_block) = eth::fetch_block_number(&self.http, &rpc_url).await else {
+                tokio::time::sleep(ROUTE_RECEIVER_POLL_INTERVAL).await;
+                continue;
             };
 
             let scan_from = if last_block == 0 {
@@ -284,15 +294,18 @@ impl ColdPath {
 
         // ── 2. Detect imbalances ──────────────────────────────────────────────
         let any_deficit = depths.iter().any(|(&chain_id, &depth)| {
-            // ratio_bps = depth / total * 10000
-            let ratio_bps = depth * U256::from(10_000u64) / total;
-            let below = ratio_bps < U256::from(min_bps);
+            let target = target_depth(chain_id);
+            if target.is_zero() {
+                return false;
+            }
+            let target_ratio_bps = depth * U256::from(10_000u64) / target;
+            let below = target_ratio_bps < U256::from(min_bps);
             if below {
                 info!(
                     chain = chain_id.0,
-                    ratio_bps = ratio_bps.to_string(),
+                    target_ratio_bps = target_ratio_bps.to_string(),
                     min_bps,
-                    "cold_path: chain below minimum pool ratio"
+                    "cold_path: chain below minimum target pool ratio"
                 );
             }
             below
@@ -340,22 +353,19 @@ impl ColdPath {
                 None => continue,
             };
             // Infrastructure: re-verify source pool depth before committing.
-            let live_depth = match eth::fetch_pool_depth(
+            let Some(live_depth) = eth::fetch_pool_depth(
                 &self.http,
                 &source_rpc,
                 &source_bank,
                 &self.pool_depth_selector,
             )
             .await
-            {
-                Some(d) => d,
-                None => {
-                    warn!(
-                        source_chain = source_chain.0,
-                        "cold_path: could not re-verify source depth — skipping"
-                    );
-                    continue;
-                }
+            else {
+                warn!(
+                    source_chain = source_chain.0,
+                    "cold_path: could not re-verify source depth — skipping"
+                );
+                continue;
             };
             let op_in_flight = self
                 .rebalance_repo
@@ -396,34 +406,96 @@ impl ColdPath {
                 .insert_rebalance_op(&op_id, source_chain, dest_chain, &amount)
                 .await;
 
-            match self
-                .submit_rebalance_with_retry(
-                    &op_id,
-                    source_chain,
-                    &source_rpc,
-                    &source_bank,
-                    dest_chain,
-                    &amount,
-                )
-                .await
+            let on_chain_cap = match eth::fetch_max_rebalance_amount(
+                &self.http,
+                &source_rpc,
+                &source_bank,
+                &self.max_rebalance_amount_selector,
+            )
+            .await
             {
-                Ok((tx_hash, ccip_msg_id)) => {
-                    info!(
+                Some(cap) if !cap.is_zero() => cap,
+                Some(_) => {
+                    warn!(
                         op_id = %op_id,
                         source_chain = source_chain.0,
-                        dest_chain = dest_chain.0,
-                        amount = %amount,
-                        tx_hash = %tx_hash,
-                        ccip_message_id = ccip_msg_id.as_deref().unwrap_or("unknown"),
-                        "cold_path: rebalance submitted"
+                        "cold_path: source Bank maxRebalanceAmount is zero — skipping"
                     );
-                    self.rebalance_repo
-                        .update_rebalance_op_submitted(&op_id, &tx_hash, ccip_msg_id.as_deref())
-                        .await;
-                }
-                Err(e) => {
-                    error!(op_id = %op_id, err = %e, "cold_path: rebalance failed after retries");
                     self.rebalance_repo.update_rebalance_op_failed(&op_id).await;
+                    continue;
+                }
+                None => {
+                    warn!(
+                        op_id = %op_id,
+                        source_chain = source_chain.0,
+                        "cold_path: could not read source Bank maxRebalanceAmount — skipping"
+                    );
+                    self.rebalance_repo.update_rebalance_op_failed(&op_id).await;
+                    continue;
+                }
+            };
+
+            let chunks = split_amount_by_cap(amount, on_chain_cap);
+            for (chunk_index, chunk_amount) in chunks.iter().enumerate() {
+                match self
+                    .submit_rebalance_with_retry(
+                        &op_id,
+                        source_chain,
+                        &source_rpc,
+                        &source_bank,
+                        dest_chain,
+                        chunk_amount,
+                    )
+                    .await
+                {
+                    Ok((tx_hash, ccip_msg_id)) => {
+                        info!(
+                            op_id = %op_id,
+                            source_chain = source_chain.0,
+                            dest_chain = dest_chain.0,
+                            amount = %chunk_amount,
+                            chunk = chunk_index + 1,
+                            chunks = chunks.len(),
+                            tx_hash = %tx_hash,
+                            ccip_message_id = ccip_msg_id.as_deref().unwrap_or("unknown"),
+                            "cold_path: rebalance submitted"
+                        );
+                        self.rebalance_repo
+                            .update_rebalance_op_submitted(&op_id, &tx_hash, ccip_msg_id.as_deref())
+                            .await;
+                    }
+                    Err(TxError::RebalanceCapExceeded) => {
+                        warn!(
+                            op_id = %op_id,
+                            on_chain_cap = %on_chain_cap,
+                            "cold_path: on-chain cap rejected op — marking failed for replanning"
+                        );
+                        self.rebalance_repo.update_rebalance_op_failed(&op_id).await;
+                        break;
+                    }
+                    Err(TxError::DestChainNotAllowlisted) => {
+                        error!(
+                            op_id = %op_id,
+                            dest_chain = dest_chain.0,
+                            "cold_path: destination not allowlisted — operator action required"
+                        );
+                        self.rebalance_repo.update_rebalance_op_failed(&op_id).await;
+                        break;
+                    }
+                    Err(TxError::PoolDepthInsufficient) => {
+                        warn!(
+                            op_id = %op_id,
+                            source_chain = source_chain.0,
+                            "cold_path: pool depth insufficient on-chain — rescheduling"
+                        );
+                        self.rebalance_repo.update_rebalance_op_failed(&op_id).await;
+                        break;
+                    }
+                    Err(e) => {
+                        error!(op_id = %op_id, err = %e, "cold_path: rebalance failed after retries");
+                        self.rebalance_repo.update_rebalance_op_failed(&op_id).await;
+                        break;
+                    }
                 }
             }
         }
@@ -501,7 +573,9 @@ impl ColdPath {
         // Advance cached nonce before sending.
         self.nonce_cache.lock().await.insert(chain_id, nonce + 1);
 
-        let tx_hash_str = eth::send_raw_transaction(&self.http, rpc_url, &raw_hex).await?;
+        let tx_hash_str = eth::send_raw_transaction(&self.http, rpc_url, &raw_hex)
+            .await
+            .map_err(map_rebalance_revert)?;
         let receipt_logs =
             eth::wait_for_receipt_logs(&self.http, rpc_url, &tx_hash_str, MAX_TX_WAIT).await?;
 
@@ -532,6 +606,50 @@ impl ColdPath {
     }
 }
 
+fn split_amount_by_cap(amount: U256, cap: U256) -> Vec<U256> {
+    if amount.is_zero() || cap.is_zero() {
+        return vec![];
+    }
+
+    let mut chunks = Vec::new();
+    let mut remaining = amount;
+    while remaining > U256::ZERO {
+        let chunk = remaining.min(cap);
+        chunks.push(chunk);
+        remaining -= chunk;
+    }
+    chunks
+}
+
+fn map_rebalance_revert(err: TxError) -> TxError {
+    let TxError::Rpc(msg) = err else {
+        return err;
+    };
+
+    let cap_selector = &format!(
+        "0x{}",
+        eth::bytes_to_hex(&keccak256(b"RebalanceCapExceeded(uint256,uint256)")[..4])
+    );
+    let dest_selector = &format!(
+        "0x{}",
+        eth::bytes_to_hex(&keccak256(b"DestChainNotAllowlisted(uint64)")[..4])
+    );
+    let pool_selector = &format!(
+        "0x{}",
+        eth::bytes_to_hex(&keccak256(b"InsufficientPoolLiquidity()")[..4])
+    );
+
+    if msg.contains(cap_selector) {
+        TxError::RebalanceCapExceeded
+    } else if msg.contains(dest_selector) {
+        TxError::DestChainNotAllowlisted
+    } else if msg.contains(pool_selector) {
+        TxError::PoolDepthInsufficient
+    } else {
+        TxError::Rpc(msg)
+    }
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -553,5 +671,19 @@ mod tests {
         // amount is in bytes 36..68.
         let enc_amount = U256::from_be_bytes::<32>(data[36..68].try_into().unwrap());
         assert_eq!(enc_amount, amount);
+    }
+
+    #[test]
+    fn split_amount_by_on_chain_cap() {
+        let chunks = split_amount_by_cap(U256::from(500u64), U256::from(200u64));
+        assert_eq!(
+            chunks,
+            vec![U256::from(200u64), U256::from(200u64), U256::from(100u64)]
+        );
+    }
+
+    #[test]
+    fn split_amount_by_zero_cap_returns_no_chunks() {
+        assert!(split_amount_by_cap(U256::from(500u64), U256::ZERO).is_empty());
     }
 }

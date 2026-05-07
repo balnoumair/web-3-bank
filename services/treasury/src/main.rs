@@ -55,7 +55,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .max_connections(10)
         .after_connect(|conn, _meta| {
             Box::pin(async move {
-                sqlx::query("SET search_path = treasury").execute(conn).await?;
+                sqlx::query("SET search_path = treasury")
+                    .execute(conn)
+                    .await?;
                 Ok(())
             })
         })

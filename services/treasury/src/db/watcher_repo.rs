@@ -71,7 +71,7 @@ mod tests {
     use crate::domain::status::AlertType;
     use sqlx::PgPool;
 
-    #[sqlx::test(migrations = "migrations")]
+    #[sqlx::test(migrations = "./migrations")]
     async fn insert_and_check_alert(pool: PgPool) {
         let repo = PgWatcherRepository::new(pool);
         let transfer_id = "0xdeadbeef";
@@ -82,7 +82,7 @@ mod tests {
         assert!(repo.already_verified(transfer_id).await);
     }
 
-    #[sqlx::test(migrations = "migrations")]
+    #[sqlx::test(migrations = "./migrations")]
     async fn insert_idempotent_on_conflict(pool: PgPool) {
         let repo = PgWatcherRepository::new(pool);
         let transfer_id = "0xdeadbeef2";
@@ -96,7 +96,7 @@ mod tests {
         assert_eq!(ids.len(), 1);
     }
 
-    #[sqlx::test(migrations = "migrations")]
+    #[sqlx::test(migrations = "./migrations")]
     async fn get_alert_ids_respects_limit(pool: PgPool) {
         let repo = PgWatcherRepository::new(pool);
         for i in 0..5 {
@@ -107,7 +107,7 @@ mod tests {
         assert_eq!(ids.len(), 3);
     }
 
-    #[sqlx::test(migrations = "migrations")]
+    #[sqlx::test(migrations = "./migrations")]
     async fn mismatch_alert_persisted(pool: PgPool) {
         let repo = PgWatcherRepository::new(pool);
         repo.insert_alert(

@@ -24,6 +24,12 @@ pub enum TxError {
     InvalidAddress,
     #[error("signing key not loaded")]
     MissingKey,
+    #[error("rebalance amount exceeds on-chain cap")]
+    RebalanceCapExceeded,
+    #[error("rebalance destination chain is not allowlisted")]
+    DestChainNotAllowlisted,
+    #[error("source pool depth is insufficient for rebalance")]
+    PoolDepthInsufficient,
     #[error("failed after {attempts} attempts")]
     RetryExhausted { attempts: u32 },
 }

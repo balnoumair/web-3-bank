@@ -219,8 +219,10 @@ CRE Orchestrator              RouteReceiver.sol          Treasury Service       
     │                              │                          │  (deficit: -$50k)        │
     │                              │                          │  Below target threshold! │
     │                              │                          │                          │
+    │                              │                          ├─ Reads Bank cap +        │
+    │                              │                          │  allowlisted route       │
     │                              │                          ├─ Triggers rebalance:     │
-    │                              │                          │  Burn 50k SyncUSD        │
+    │                              │                          │  rebalance(Base, 50k)    │
     │                              │                          │  on Tempo ───────────────►│
     │                              │                          │                          ├─ CCIP burns on Tempo
     │                              │                          │                          ├─ Transmits proof
@@ -229,7 +231,8 @@ CRE Orchestrator              RouteReceiver.sol          Treasury Service       
     │                              │                          │                          │  SyncUSD on Base
     │                              │                          │                          │
     │                              │                          ├─ Confirms rebalance      │
-    │                              │                          ├─ Records in Postgres     │
+    │                              │                          ├─ Records messageId       │
+    │                              │                          │  in Postgres             │
     │                              │                          ├─ Tempo pool: $200k ✓     │
     │                              │                          ├─ Base pool: $200k ✓      │
 ```

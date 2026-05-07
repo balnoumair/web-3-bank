@@ -169,9 +169,8 @@ impl HotPath {
                 .collect();
 
             for (chain_id, rpc_url, bank_addr) in chains {
-                let to_block = match eth::fetch_block_number(&self.http, &rpc_url).await {
-                    Some(b) => b,
-                    None => continue,
+                let Some(to_block) = eth::fetch_block_number(&self.http, &rpc_url).await else {
+                    continue;
                 };
 
                 let from_block = last_block.get(&chain_id).copied();
@@ -223,12 +222,9 @@ impl HotPath {
         info!("hot_path: route receiver polling started");
 
         loop {
-            let to_block = match eth::fetch_block_number(&self.http, &rpc_url).await {
-                Some(b) => b,
-                None => {
-                    tokio::time::sleep(ROUTE_RECEIVER_POLL_INTERVAL).await;
-                    continue;
-                }
+            let Some(to_block) = eth::fetch_block_number(&self.http, &rpc_url).await else {
+                tokio::time::sleep(ROUTE_RECEIVER_POLL_INTERVAL).await;
+                continue;
             };
 
             let scan_from = if last_block == 0 {

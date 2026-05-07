@@ -5,6 +5,7 @@
 //! It is pure computation with no I/O dependencies.
 
 use alloy_primitives::U256;
+use std::cmp::Reverse;
 
 /// Greedily match surplus chains to deficit chains, emitting
 /// `(source_chain_id, dest_chain_id, amount)` triples.
@@ -21,8 +22,8 @@ pub fn compute_rebalance_ops(
     // Sort descending so we drain the biggest imbalances first.
     let mut sur: Vec<(u64, U256)> = surpluses.to_vec();
     let mut def: Vec<(u64, U256)> = deficits.to_vec();
-    sur.sort_by(|a, b| b.1.cmp(&a.1));
-    def.sort_by(|a, b| b.1.cmp(&a.1));
+    sur.sort_by_key(|(_, amount)| Reverse(*amount));
+    def.sort_by_key(|(_, amount)| Reverse(*amount));
 
     // Mutable remaining amounts.
     let mut sur_rem: Vec<U256> = sur.iter().map(|(_, a)| *a).collect();
