@@ -5,9 +5,10 @@
 - [x] Define `IReserveBridge` interface:
   - [x] `bridgeOut(uint64 destChainId, uint256 amount, address destReserve) returns (bytes32 messageId)`
   - [x] `bridgeIn(...)` callback (signature per bridge type — abstract in interface).
-- [ ] Implement `CCTPReserveBridge` adapter for CCTP-supported chains:
-  - [ ] Wraps Circle's `TokenMessenger.depositForBurn` and `MessageTransmitter.receiveMessage`.
-  - [ ] Tests against forked Base/Arbitrum.
+- [x] Implement `CCTPReserveBridge` adapter for CCTP-supported chains:
+  - [x] Wraps Circle's `TokenMessenger.depositForBurn` and `MessageTransmitter.receiveMessage`.
+  - [x] Unit tests with mocked CCTP contracts (23 tests in `CCTPReserveBridge.t.sol`).
+  - [ ] Integration tests against forked Base/Arbitrum (deferred — tracked under section 3 alongside Treasury fork test).
 - [ ] Implement Tempo custom reserve bridge:
   - [ ] Decide LayerZero vs. Wormhole as messaging protocol (sub-decision).
   - [ ] Adapter sends release intent on source via the chosen protocol.
