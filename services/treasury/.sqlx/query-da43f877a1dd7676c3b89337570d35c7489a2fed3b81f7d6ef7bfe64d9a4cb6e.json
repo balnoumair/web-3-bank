@@ -1,0 +1,80 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT op_id, source_chain_id, dest_chain_id, amount_wei::TEXT AS amount_wei,\n                   bridge_type, bridge_message_id, source_tx_hash, cctp_message_bytes,\n                   cctp_attestation, dest_tx_hash, status\n            FROM treasury.reserve_ops\n            WHERE status = 'submitted'\n              AND bridge_message_id IS NOT NULL\n              AND cctp_attestation IS NULL\n            ORDER BY updated_at ASC\n            LIMIT 50\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "op_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "source_chain_id",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 2,
+        "name": "dest_chain_id",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 3,
+        "name": "amount_wei",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "bridge_type",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "bridge_message_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "source_tx_hash",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "cctp_message_bytes",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "cctp_attestation",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 9,
+        "name": "dest_tx_hash",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 10,
+        "name": "status",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      null,
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      false
+    ]
+  },
+  "hash": "da43f877a1dd7676c3b89337570d35c7489a2fed3b81f7d6ef7bfe64d9a4cb6e"
+}

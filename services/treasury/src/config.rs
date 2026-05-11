@@ -75,6 +75,55 @@ pub struct Config {
     /// Default: 1800 (30 minutes).
     #[serde(default = "default_cold_path_stuck_message_timeout_secs")]
     pub cold_path_stuck_message_timeout_secs: u64,
+
+    // ── Reserve-path rebalancing (USDC reserves via CCTP) ─────────────────────
+    /// Minimum ratio to target reserve depth in basis points (0–10 000) below
+    /// which a chain triggers a reserve bridge.  Default: 8000 (80 %).
+    #[serde(default = "default_reserve_path_min_bps")]
+    pub reserve_path_min_bps: u32,
+
+    /// Maximum USDC (in 6-decimal wei) per single reserve bridge operation,
+    /// as a decimal string.  Empty = no cap.
+    #[serde(default)]
+    pub reserve_path_max_wei: String,
+
+    /// How often (seconds) the reserve-path monitor checks reserve depths.
+    /// Default: 60.
+    #[serde(default = "default_reserve_path_poll_secs")]
+    pub reserve_path_poll_secs: u64,
+
+    /// Seconds before a stuck reserve-bridge op is marked failed for operator
+    /// review.  Default: 1800 (30 minutes, matches spec for CCTP).
+    #[serde(default = "default_reserve_path_stuck_timeout_secs")]
+    pub reserve_path_stuck_timeout_secs: u64,
+
+    /// JSON map of chain_id → CCTPReserveBridge contract address (checksummed
+    /// hex).  Required for the reserve-path relayer loop to dispatch
+    /// `bridgeIn` on the destination chain.
+    #[serde(default)]
+    pub reserve_bridge_addresses: Option<JsonMap<u64, String>>,
+
+    /// JSON map of chain_id → CCTP domain (Ethereum=0, Avalanche=1, OP=2,
+    /// Arbitrum=3, Base=6, …).  Required for fetching Circle attestations.
+    #[serde(default)]
+    pub cctp_domains: Option<JsonMap<u64, u32>>,
+
+    /// Circle attestation service base URL.  Default: production endpoint.
+    /// Override for testnet (`https://iris-api-sandbox.circle.com`).
+    #[serde(default = "default_circle_attestation_url")]
+    pub circle_attestation_api_url: String,
+
+    /// Path to the reserve-ops relayer private key file.  When unset, the
+    /// cold-path `relayer_key_path` is reused — fine for dev but production
+    /// SHOULD use a separate key so the role grant blast radius is limited.
+    #[serde(default)]
+    pub reserve_relayer_key_path: Option<String>,
+
+    /// Wei to include as `msg.value` on `bridgeIn` calls (gas for the destination
+    /// adapter).  CCTP itself does not charge a fee at receive time; this value is
+    /// 0 for most chains.  Default: "0".
+    #[serde(default)]
+    pub reserve_bridge_fee_wei: String,
 }
 
 fn default_grpc_port() -> u16 {
@@ -91,6 +140,22 @@ fn default_cold_path_poll_secs() -> u64 {
 
 fn default_cold_path_stuck_message_timeout_secs() -> u64 {
     1_800
+}
+
+fn default_reserve_path_min_bps() -> u32 {
+    8000 // 80 % of target — spec trigger threshold
+}
+
+fn default_reserve_path_poll_secs() -> u64 {
+    60
+}
+
+fn default_reserve_path_stuck_timeout_secs() -> u64 {
+    1_800 // 30 minutes — spec CCTP timeout
+}
+
+fn default_circle_attestation_url() -> String {
+    "https://iris-api.circle.com".to_string()
 }
 
 impl Config {

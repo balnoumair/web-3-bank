@@ -7,6 +7,7 @@ mod eth;
 mod home_chain;
 mod hot_path;
 mod pool_manager;
+mod reserve_path;
 mod server;
 mod watcher;
 
@@ -35,6 +36,7 @@ use crate::home_chain::HomeChainIndexer;
 use crate::hot_path::HotPath;
 use crate::pool_manager::PoolManager;
 use crate::proto::treasury::treasury_service_server::TreasuryServiceServer;
+use crate::reserve_path::ReservePath;
 use crate::server::{check_relayer_key, check_rpc_reachable, TreasuryServer};
 use crate::watcher::Watcher;
 
@@ -91,17 +93,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let rebalance_repo = Arc::new(db::PgRebalanceRepository::new(pool.clone()));
     let watcher_repo = Arc::new(db::PgWatcherRepository::new(pool.clone()));
     let snapshot_repo = Arc::new(db::PgPoolSnapshotRepository::new(pool.clone()));
+    let reserve_repo: Arc<dyn crate::domain::repository::ReserveRepository> =
+        Arc::new(db::PgReserveRepository::new(pool.clone()));
 
     let hot_path = HotPath::new(Arc::clone(&relay_repo), Arc::clone(&cfg), http.clone());
     let pool_manager = PoolManager::new(snapshot_repo, Arc::clone(&cfg), http.clone());
     let watcher = Watcher::new(watcher_repo, Arc::clone(&cfg), http.clone());
     let cold_path = ColdPath::new(rebalance_repo, Arc::clone(&cfg), http.clone());
+    let reserve_path = ReservePath::new(reserve_repo, Arc::clone(&cfg), http.clone());
 
     // ── 4. Spawn background tasks ─────────────────────────────────────────────
     Arc::clone(&hot_path).spawn_background();
     Arc::clone(&pool_manager).spawn_background();
     Arc::clone(&watcher).spawn_background();
     Arc::clone(&cold_path).spawn_background();
+    Arc::clone(&reserve_path).spawn_background();
 
     if let Some(ref user_ep) = cfg.user_service_addr {
         HomeChainIndexer::new(Arc::clone(&cfg), http.clone(), user_ep.clone()).spawn_background();

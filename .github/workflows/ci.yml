@@ -34,7 +34,7 @@ jobs:
               - 'turbo.json'
               - 'tsconfig.base.json'
             foundry:
-              - 'packages/cre-contracts/**'
+              - 'packages/onchain/**'
             treasury:
               - 'services/treasury/**'
             user-service:

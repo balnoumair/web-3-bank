@@ -54,7 +54,11 @@ contract MockReserveBridge is IReserveBridge {
         emit MockBridgeOut(msg.sender, destChainId, destReserve, amount, messageId);
     }
 
-    function bridgeIn(bytes calldata message) external pure returns (bytes32 messageId) {
+    function bridgeIn(bytes calldata message, bytes calldata /* attestation */)
+        external
+        pure
+        returns (bytes32 messageId)
+    {
         return keccak256(message);
     }
 

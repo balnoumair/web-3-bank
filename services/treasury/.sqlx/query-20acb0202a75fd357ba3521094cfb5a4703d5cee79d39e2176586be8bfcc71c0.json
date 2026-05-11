@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO treasury.reserve_ops\n                (op_id, source_chain_id, dest_chain_id, amount_wei, bridge_type, status)\n            VALUES ($1, $2, $3, $4::NUMERIC, $5, 'pending')\n            ON CONFLICT (op_id) DO NOTHING\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Int8",
+        "Int8",
+        "Numeric",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "20acb0202a75fd357ba3521094cfb5a4703d5cee79d39e2176586be8bfcc71c0"
+}
