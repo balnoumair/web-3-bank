@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE treasury.reserve_ops SET status = 'relayed', dest_tx_hash = $1, updated_at = NOW() WHERE op_id = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "8862072ca94796304fe325a7dabab4ec13b267296a45cd34f4591c5952a3e4b2"
+}

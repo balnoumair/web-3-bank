@@ -106,6 +106,86 @@ pub trait RebalanceRepository: Send + Sync {
     async fn update_rebalance_op_failed(&self, op_id: &OperationId);
 }
 
+// ── Reserve repository (USDC reserve rebalance) ─────────────────────────────
+
+/// One in-flight reserve bridge operation, used by `reserve_path` when driving the relayer and
+/// watcher loops. Mirrors a row of `treasury.reserve_ops`.
+#[derive(Debug, Clone)]
+pub struct ReserveOpRow {
+    pub op_id: String,
+    pub source_chain_id: i64,
+    pub dest_chain_id: i64,
+    pub amount_wei: String,
+    pub bridge_type: String,
+    pub bridge_message_id: Option<String>,
+    pub source_tx_hash: Option<String>,
+    pub cctp_message_bytes: Option<String>,
+    pub cctp_attestation: Option<String>,
+    pub dest_tx_hash: Option<String>,
+    pub status: String,
+}
+
+#[async_trait]
+pub trait ReserveRepository: Send + Sync {
+    /// True iff a recent (24h) `pending`/`submitted`/`relayed` op exists for this chain pair.
+    async fn op_in_flight(&self, source_chain: ChainId, dest_chain: ChainId) -> bool;
+
+    /// Insert a new reserve op in `pending` status.
+    async fn insert_reserve_op(
+        &self,
+        op_id: &OperationId,
+        source_chain: ChainId,
+        dest_chain: ChainId,
+        amount: &U256,
+        bridge_type: &str,
+    );
+
+    /// Mark a reserve op as `submitted`, attaching the source tx hash and the `messageId`
+    /// emitted by `ReserveBridgeInitiated`.
+    async fn update_submitted(
+        &self,
+        op_id: &OperationId,
+        source_tx_hash: &TxHash,
+        bridge_message_id: Option<&str>,
+    );
+
+    /// Persist Circle's `(message, attestation)` once fetched. Status is unchanged here —
+    /// the relayer loop reads these columns to decide when to dispatch `bridgeIn`.
+    async fn update_attestation(
+        &self,
+        op_id: &OperationId,
+        cctp_message_bytes: &str,
+        cctp_attestation: &str,
+    );
+
+    /// Mark a reserve op as `relayed` and attach the destination `bridgeIn` tx hash.
+    async fn update_relayed(&self, op_id: &OperationId, dest_tx_hash: &TxHash);
+
+    /// Mark a reserve op as `completed` (destination `ReserveBridgeCompleted` event observed).
+    async fn update_completed(&self, op_id: &OperationId);
+
+    /// Mark a reserve op as `failed` (timeout or unrecoverable error).
+    async fn update_failed(&self, op_id: &OperationId);
+
+    /// Fetch ops in `submitted` status (awaiting Circle attestation) for relayer loop.
+    async fn list_awaiting_attestation(&self) -> Vec<ReserveOpRow>;
+
+    /// Fetch ops in `relayed` status (awaiting on-chain completion) for watcher loop.
+    async fn list_awaiting_completion(&self) -> Vec<ReserveOpRow>;
+
+    /// Fetch a single op by its bridge_message_id and destination chain. Returns `None` if no
+    /// match — used by the watcher to correlate observed `ReserveBridgeCompleted` events.
+    async fn find_by_dest_and_message_id(
+        &self,
+        dest_chain: ChainId,
+        bridge_message_id: &str,
+    ) -> Option<ReserveOpRow>;
+
+    /// Fetch in-flight ops (any pre-`completed` status) older than `stuck_after_secs` so the
+    /// orchestrator can fail them and alert.
+    async fn list_stuck(&self, stuck_after_secs: i64) -> Vec<ReserveOpRow>;
+}
+
 // ── Pool snapshot repository ────────────────────────────────────────────────
 
 #[async_trait]

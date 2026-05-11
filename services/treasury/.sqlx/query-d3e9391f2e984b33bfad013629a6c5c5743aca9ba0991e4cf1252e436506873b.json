@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE treasury.reserve_ops SET status = 'failed', updated_at = NOW() WHERE op_id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "d3e9391f2e984b33bfad013629a6c5c5743aca9ba0991e4cf1252e436506873b"
+}

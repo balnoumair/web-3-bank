@@ -51,15 +51,16 @@
 
 ## 3. Treasury Service (`services/treasury`)
 
-- [ ] Migration: create `treasury.reserve_ops` table.
-- [ ] New module `reserve_path.rs`:
-  - [ ] Polls `reserveDepth()` on each Bank Contract.
-  - [ ] Computes per-chain target deviation against configured thresholds.
-  - [ ] Plans bridge operations (within cap, respecting activation gate).
-  - [ ] Calls `bridgeReserve` and persists messageId to `reserve_ops`.
-  - [ ] Watches for `ReserveBridgeCompleted` events on destination, updates row to `completed`.
-  - [ ] Times out and marks `failed` after configurable interval; alerts operators.
-- [ ] Integration test against forked CCTP Base + Arbitrum.
+- [x] Migration: create `treasury.reserve_ops` table (`migrations/20260511000000_reserve_ops.sql`).
+- [x] New module `reserve_path.rs`:
+  - [x] Polls `reserveDepth()` on each Bank Contract (planner loop).
+  - [x] Computes per-chain target deviation against `RESERVE_PATH_MIN_BPS` of `total / n` target.
+  - [x] Plans bridge operations (reuses `compute_rebalance_ops`; respects `RouteReceiver` activation gate).
+  - [x] Calls `bridgeReserve` and persists `messageId` to `reserve_ops`.
+  - [x] Relayer loop: fetches Circle attestation via `iris-api`, dispatches `bridgeIn` on destination adapter.
+  - [x] Watcher loop: scans destination chains for `ReserveBridgeCompleted` events, updates row to `completed`.
+  - [x] Times out stuck ops past `RESERVE_PATH_STUCK_TIMEOUT_SECS` and marks `failed`.
+- [ ] Integration test against forked CCTP Base + Arbitrum (deferred — requires testnet RPC + funded keys; tracked under section 5 deployment).
 
 ## 4. CRE / RouteReceiver
 
