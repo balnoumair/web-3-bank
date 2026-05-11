@@ -9,12 +9,13 @@
   - [x] Wraps Circle's `TokenMessenger.depositForBurn` and `MessageTransmitter.receiveMessage`.
   - [x] Unit tests with mocked CCTP contracts (23 tests in `CCTPReserveBridge.t.sol`).
   - [ ] Integration tests against forked Base/Arbitrum (deferred — tracked under section 3 alongside Treasury fork test).
-- [ ] Implement Tempo custom reserve bridge:
-  - [ ] Decide LayerZero vs. Wormhole as messaging protocol (sub-decision).
-  - [ ] Adapter sends release intent on source via the chosen protocol.
-  - [ ] Multisig signs and submits release on destination Tempo Bank Contract.
-  - [ ] Replay protection via per-message nonce.
-  - [ ] Tests against forked Tempo + a CCTP chain.
+- [x] Implement Tempo custom reserve bridge (`TempoReserveBridge.sol`):
+  - [x] Decision: **LayerZero v2** chosen (Wormhole has no documented Tempo support; LZ is a launch partner and powers USDT0 on Tempo today).
+  - [x] Adapter sends release intent on source via LayerZero v2 `endpoint.send`. Adapter custodies locked USDC and ETH used for LZ fees (governance tops up).
+  - [x] Destination flow: `lzReceive` queues `PendingRelease`; an N-of-M EIP-712 multisig signs `(sourceChainId, amount, recipient, messageId)`; `executeRelease(messageId, sigs[])` verifies signatures, releases USDC, calls `Bank.completeReserveBridge`.
+  - [x] Replay protection: per-EID outbound nonce on source; `pendingReleases[messageId].executed` flag on dest; strict-ascending signer order rejects duplicate signatures.
+  - [x] Unit tests with mocked LZ endpoint (26 tests in `TempoReserveBridge.t.sol`).
+  - [ ] Forked Tempo + CCTP-chain integration tests (deferred — requires Tempo Moderato RPC + funded keys; tracked under section 5 deployment).
 
 ## 2. On-chain Bank Contract (`packages/onchain`)
 
