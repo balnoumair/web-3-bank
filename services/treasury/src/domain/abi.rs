@@ -61,7 +61,11 @@ pub fn encode_bridge_reserve(selector: &[u8; 4], dest_chain_id: u64, amount: &U2
 ///   tail[1]: uint256(attestation.len) || attestation || zero-padding
 pub fn encode_bridge_in(selector: &[u8; 4], message: &[u8], attestation: &[u8]) -> Vec<u8> {
     fn pad_len(n: usize) -> usize {
-        if n.is_multiple_of(32) { 0 } else { 32 - (n % 32) }
+        if n.is_multiple_of(32) {
+            0
+        } else {
+            32 - (n % 32)
+        }
     }
     fn write_u256(buf: &mut Vec<u8>, val: u64) {
         buf.extend_from_slice(&[0u8; 24]);
@@ -231,8 +235,7 @@ mod tests {
             "{}",
             alloy_primitives::keccak256(b"ReserveBridgeInitiated(bytes32,uint64,uint256,bytes32)")
         );
-        let dest_chain_topic =
-            "0x0000000000000000000000000000000000000000000000000000000000002105";
+        let dest_chain_topic = "0x0000000000000000000000000000000000000000000000000000000000002105";
         let logs = vec![
             serde_json::json!({"topics": ["0xdeadbeef"]}),
             serde_json::json!({"topics": [event_topic, message_id, dest_chain_topic]}),

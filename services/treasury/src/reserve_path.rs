@@ -42,7 +42,9 @@ use tokio::sync::{Mutex, RwLock};
 use tracing::{error, info, warn};
 
 use crate::config::Config;
-use crate::domain::abi::{encode_bridge_in, encode_bridge_reserve, extract_reserve_bridge_initiated_message_id};
+use crate::domain::abi::{
+    encode_bridge_in, encode_bridge_reserve, extract_reserve_bridge_initiated_message_id,
+};
 use crate::domain::newtypes::{ChainId, OperationId, TxHash};
 use crate::domain::rebalance::{compute_rebalance_ops, evaluate_rebalance_op, RebalanceOpDecision};
 use crate::domain::repository::{ReserveOpRow, ReserveRepository};
@@ -190,7 +192,11 @@ impl ReservePath {
                 tokio::time::sleep(ROUTE_RECEIVER_POLL_INTERVAL).await;
                 continue;
             };
-            let from = if last_block == 0 { to_block } else { last_block };
+            let from = if last_block == 0 {
+                to_block
+            } else {
+                last_block
+            };
             let from = from.max(to_block.saturating_sub(MAX_BLOCK_RANGE));
 
             let logs = eth::fetch_logs(
@@ -255,8 +261,13 @@ impl ReservePath {
         // 1. Fetch reserve depths.
         let mut depths: HashMap<ChainId, U256> = HashMap::new();
         for (chain_id, rpc_url, bank_addr) in &chains {
-            match eth::fetch_pool_depth(&self.http, rpc_url, bank_addr, &self.reserve_depth_selector)
-                .await
+            match eth::fetch_pool_depth(
+                &self.http,
+                rpc_url,
+                bank_addr,
+                &self.reserve_depth_selector,
+            )
+            .await
             {
                 Some(d) => {
                     depths.insert(*chain_id, d);
@@ -307,7 +318,10 @@ impl ReservePath {
         if ops.is_empty() {
             return;
         }
-        info!(op_count = ops.len(), "reserve_path: planner emitting bridge ops");
+        info!(
+            op_count = ops.len(),
+            "reserve_path: planner emitting bridge ops"
+        );
 
         // 4. Submit each op.
         for (src_raw, dst_raw, amount) in ops {
@@ -331,7 +345,10 @@ impl ReservePath {
             )
             .await
             else {
-                warn!(source_chain = source_chain.0, "reserve_path: re-verify depth failed");
+                warn!(
+                    source_chain = source_chain.0,
+                    "reserve_path: re-verify depth failed"
+                );
                 continue;
             };
 
@@ -364,7 +381,14 @@ impl ReservePath {
                 .await;
 
             match self
-                .submit_bridge_reserve(&op_id, source_chain, &src_rpc, &src_bank, dest_chain, &amount)
+                .submit_bridge_reserve(
+                    &op_id,
+                    source_chain,
+                    &src_rpc,
+                    &src_bank,
+                    dest_chain,
+                    &amount,
+                )
                 .await
             {
                 Ok((tx_hash, message_id)) => {
@@ -630,7 +654,15 @@ impl ReservePath {
         let mut delay = Duration::from_secs(1);
         for attempt in 1..=MAX_RETRIES {
             match self
-                .submit_bridge_in_once(dest_chain, rpc_url, adapter_addr, message, attestation, &relayer_addr, key)
+                .submit_bridge_in_once(
+                    dest_chain,
+                    rpc_url,
+                    adapter_addr,
+                    message,
+                    attestation,
+                    &relayer_addr,
+                    key,
+                )
                 .await
             {
                 Ok(t) => return Ok(t),
@@ -722,7 +754,8 @@ impl ReservePath {
                 f
             };
 
-            let logs = eth::fetch_logs(&self.http, rpc_url, bank_addr, &topic, from, to_block).await;
+            let logs =
+                eth::fetch_logs(&self.http, rpc_url, bank_addr, &topic, from, to_block).await;
             for log in &logs {
                 if log.topics.len() < 2 {
                     continue;
