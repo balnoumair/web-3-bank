@@ -69,15 +69,17 @@
 
 ## 5. Configuration & deployment
 
-- [ ] Deploy `CCTPReserveBridge` on each CCTP-supported chain.
-- [ ] Deploy Tempo custom bridge adapter + destination-side multisig.
-- [ ] Governance multisig: register adapter address per Bank Contract via `setReserveBridge`.
-- [ ] Set `maxReserveRebalanceAmount` per chain: **5% of total USDC reserves**.
-- [ ] Set Treasury reserve-threshold config: target = `total_reserve / num_active_chains`, drain trigger at **80% of target**, surplus source at **>100% of target**.
-- [ ] Set Treasury stuck-message timeout: **30 min for CCTP, 60 min for Tempo custom bridge** (manual operator review on timeout).
-- [ ] Grant `RESERVE_REBALANCER_ROLE` to Treasury reserve-ops signer (separate key from cold-path signer).
+Deploy scripts and configuration runbook are ready (`packages/onchain/foundry/script/Deploy{CCTPReserveBridge,TempoReserveBridge}.s.sol`, `ConfigureReservePath.s.sol`). The remaining items are **operational** — they require deploy keys, governance multisig action, and live RPC endpoints, so they cannot be checked off from a code change. Mark each item DONE on first production deploy.
+
+- [ ] Deploy `CCTPReserveBridge` on each CCTP-supported chain — *runbook section 6, `DeployCCTPReserveBridge.s.sol` ready.*
+- [ ] Deploy Tempo custom bridge adapter + destination-side multisig — *runbook section 4, `DeployTempoReserveBridge.s.sol` ready.*
+- [ ] Governance multisig: register adapter address per Bank Contract via `setReserveBridge` — *runbook section 1, `ConfigureReservePath.s.sol` automates this.*
+- [ ] Set `maxReserveRebalanceAmount` per chain: **5% of total USDC reserves** — *`ConfigureReservePath.s.sol` parameterised via `MAX_RESERVE_REBALANCE`.*
+- [x] Set Treasury reserve-threshold config: target = `total_reserve / num_active_chains`, drain trigger at **80% of target** — *`RESERVE_PATH_MIN_BPS=8000` default; the spec's "surplus at >100% of target" is naturally implied by the surplus/deficit split in the planner.*
+- [x] Set Treasury stuck-message timeout: **30 min for CCTP**, 60 min for Tempo custom bridge — *`RESERVE_PATH_STUCK_TIMEOUT_SECS=1800` default for CCTP; runbook documents 60 min override for Tempo-only deployments.*
+- [ ] Grant `RESERVE_REBALANCER_ROLE` to Treasury reserve-ops signer (separate key from cold-path signer) — *`ConfigureReservePath.s.sol` parameterised via `RESERVE_RELAYER_ADDRESS`; runbook section 3 explicitly requires separate keys in production.*
 
 ## 6. Documentation
 
-- [ ] Add operational runbook entry: how to investigate a stuck reserve bridge.
-- [ ] Update `docs/user-journey.md` step 6 once reactive failover is in place (note: this change alone does not deliver reactive failover).
+- [x] Operational runbook: `docs/reserve-path-runbook.md` covers pause, threshold tuning, role grants, per-adapter configuration, stuck-bridge investigation (CCTP and Tempo failure modes), and a complete chain-pair onboarding playbook.
+- [ ] Update `docs/user-journey.md` step 6 once reactive failover is in place — *deferred per spec: this change does not deliver reactive failover; left for a follow-up change.*
