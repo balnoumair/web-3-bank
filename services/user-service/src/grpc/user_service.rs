@@ -56,11 +56,9 @@ pub struct UserServiceImpl {
 }
 
 impl UserServiceImpl {
-    fn authorize_decommission_override<T>(&self, request: &Request<T>) -> Result<(), Status> {
+    fn decommission_override_denial<T>(&self, request: &Request<T>) -> Option<&'static str> {
         let Some(expected) = self.decommission_orchestrator_token.as_deref() else {
-            return Err(Status::permission_denied(
-                "decommission home-chain override is not configured",
-            ));
+            return Some("decommission home-chain override is not configured");
         };
         let provided = request
             .metadata()
@@ -68,11 +66,9 @@ impl UserServiceImpl {
             .and_then(|value| value.to_str().ok());
 
         if provided == Some(expected) {
-            Ok(())
+            None
         } else {
-            Err(Status::permission_denied(
-                "invalid decommission orchestrator token",
-            ))
+            Some("invalid decommission orchestrator token")
         }
     }
 }
@@ -389,7 +385,9 @@ impl UserService for UserServiceImpl {
         request: Request<SetUserHomeChainRequest>,
     ) -> Result<Response<SetUserHomeChainResponse>, Status> {
         if request.get_ref().decommission_override {
-            self.authorize_decommission_override(&request)?;
+            if let Some(message) = self.decommission_override_denial(&request) {
+                return Err(Status::permission_denied(message));
+            }
         }
 
         let req = request.into_inner();
