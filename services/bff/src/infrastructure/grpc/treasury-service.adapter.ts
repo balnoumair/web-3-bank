@@ -12,7 +12,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 
 const PROTO_PATH = resolve(
   __dirname,
-  "../../../../../packages/proto/treasury/treasury_service.proto"
+  "../../../../../packages/proto/treasury/treasury_service.proto",
 );
 
 const packageDef = protoLoader.loadSync(PROTO_PATH, {
@@ -34,7 +34,7 @@ export class GrpcTreasuryServiceAdapter implements ITreasuryService {
   constructor(addr = process.env.TREASURY_SERVICE_ADDR ?? "localhost:50052") {
     this.client = new treasury.TreasuryService(
       addr,
-      grpc.credentials.createInsecure()
+      grpc.credentials.createInsecure(),
     );
   }
 
@@ -45,7 +45,7 @@ export class GrpcTreasuryServiceAdapter implements ITreasuryService {
         (err: grpc.ServiceError | null, res: { balanceWei: string }) => {
           if (err) reject(grpcToError(err));
           else resolve(res.balanceWei);
-        }
+        },
       );
     });
   }
@@ -57,7 +57,7 @@ export class GrpcTreasuryServiceAdapter implements ITreasuryService {
         (err: grpc.ServiceError | null, res: { depthWei: string }) => {
           if (err) reject(grpcToError(err));
           else resolve({ chainId: chainId.toString(), depthWei: res.depthWei });
-        }
+        },
       );
     });
   }
@@ -79,7 +79,7 @@ export class GrpcTreasuryServiceAdapter implements ITreasuryService {
               status: string;
               createdAt: string;
             }>;
-          }
+          },
         ) => {
           if (err) {
             reject(grpcToError(err));
@@ -92,10 +92,10 @@ export class GrpcTreasuryServiceAdapter implements ITreasuryService {
                 amount: t.amountWei,
                 timestamp: t.createdAt,
                 txHash: t.sourceEventHash,
-              }))
+              })),
             );
           }
-        }
+        },
       );
     });
   }
@@ -107,7 +107,19 @@ export class GrpcTreasuryServiceAdapter implements ITreasuryService {
         (err: grpc.ServiceError | null, res: { active: boolean }) => {
           if (err) reject(grpcToError(err));
           else resolve(res.active);
-        }
+        },
+      );
+    });
+  }
+
+  isChainDecommissioned(chainId: number): Promise<boolean> {
+    return new Promise((resolve, reject) => {
+      this.client.isChainDecommissioned(
+        { chainId: chainId.toString() },
+        (err: grpc.ServiceError | null, res: { decommissioned: boolean }) => {
+          if (err) reject(grpcToError(err));
+          else resolve(res.decommissioned);
+        },
       );
     });
   }
@@ -118,7 +130,7 @@ function grpcToError(err: grpc.ServiceError): Error {
     err.code === grpc.status.NOT_FOUND
       ? "Not found"
       : err.code === grpc.status.UNIMPLEMENTED
-      ? "Not implemented"
-      : err.message;
+        ? "Not implemented"
+        : err.message;
   return new Error(message);
 }

@@ -19,4 +19,6 @@ export interface ITreasuryService {
   getRecentTransfers(address: string, limit: number): Promise<Transfer[]>;
   /** RouteReceiver-derived active set (same as hot-path relayer). */
   isChainActive(chainId: number): Promise<boolean>;
+  /** Governance-finalized terminal chain state. */
+  isChainDecommissioned(chainId: number): Promise<boolean>;
 }

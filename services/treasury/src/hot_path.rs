@@ -69,6 +69,10 @@ pub struct HotPath {
     hot_path_topic: B256,
     /// keccak256("ActivationPublished(string,string,string,uint256,string,string,uint256)")
     activation_topic: B256,
+    /// keccak256("ChainDecommissionFinalized(uint256)")
+    decommission_finalized_topic: B256,
+    /// Chain IDs finalized by governance as decommissioned.
+    decommissioned_chains: Arc<RwLock<HashSet<ChainId>>>,
     /// 4-byte selector for `releaseHotPath(address,uint256,bytes32)`
     release_selector: [u8; 4],
     /// 4-byte selector for `poolDepth()`
@@ -93,6 +97,7 @@ impl HotPath {
             keccak256(b"HotPathInitiated(address,address,uint256,uint256,bytes32,uint256)");
         let activation_topic =
             keccak256(b"ActivationPublished(string,string,string,uint256,string,string,uint256)");
+        let decommission_finalized_topic = keccak256(b"ChainDecommissionFinalized(uint256)");
 
         let release_hash = keccak256(b"releaseHotPath(address,uint256,bytes32)");
         let pool_depth_hash = keccak256(b"poolDepth()");
@@ -111,6 +116,8 @@ impl HotPath {
             nonce_cache: Arc::new(Mutex::new(HashMap::new())),
             hot_path_topic,
             activation_topic,
+            decommission_finalized_topic,
+            decommissioned_chains: Arc::new(RwLock::new(HashSet::new())),
             release_selector,
             pool_depth_selector,
         })
@@ -141,6 +148,19 @@ impl HotPath {
     /// (seeded with all configured chains until the first activation publish).
     pub async fn is_chain_active(&self, chain_id: u64) -> bool {
         self.active_chains.read().await.contains(&ChainId(chain_id))
+            && !self
+                .decommissioned_chains
+                .read()
+                .await
+                .contains(&ChainId(chain_id))
+    }
+
+    /// Whether governance has finalized terminal decommission for `chain_id`.
+    pub async fn is_chain_decommissioned(&self, chain_id: u64) -> bool {
+        self.decommissioned_chains
+            .read()
+            .await
+            .contains(&ChainId(chain_id))
     }
 
     // ── Background loops ──────────────────────────────────────────────────────
@@ -215,7 +235,8 @@ impl HotPath {
         };
 
         let mut last_block: u64 = 0;
-        let topic = format!("{}", self.activation_topic);
+        let activation_topic = format!("{}", self.activation_topic);
+        let decommission_topic = format!("{}", self.decommission_finalized_topic);
         info!("hot_path: route receiver polling started");
 
         loop {
@@ -234,7 +255,7 @@ impl HotPath {
                 &self.http,
                 &rpc_url,
                 &self.config.route_receiver_address,
-                &topic,
+                &activation_topic,
                 scan_from,
                 to_block,
             )
@@ -247,6 +268,31 @@ impl HotPath {
                         chains.into_iter().map(ChainId).collect();
                     info!(chains = ?chains_converted, "hot_path: activation state updated from RouteReceiver");
                     *self.active_chains.write().await = chains_converted;
+                }
+            }
+
+            let decommission_logs = eth::fetch_logs(
+                &self.http,
+                &rpc_url,
+                &self.config.route_receiver_address,
+                &decommission_topic,
+                scan_from,
+                to_block,
+            )
+            .await;
+
+            for log in &decommission_logs {
+                if log.topics.len() < 2 {
+                    continue;
+                }
+                if let Some(chain_id) = eth::decode_indexed_u64_topic(&log.topics[1]) {
+                    let chain = ChainId(chain_id);
+                    self.decommissioned_chains.write().await.insert(chain);
+                    self.active_chains.write().await.remove(&chain);
+                    info!(
+                        chain = chain_id,
+                        "hot_path: chain finalized as decommissioned"
+                    );
                 }
             }
 
@@ -268,11 +314,7 @@ impl HotPath {
         }
 
         // 2. Read destination chain active state.
-        let chain_active = self
-            .active_chains
-            .read()
-            .await
-            .contains(&event.dest_chain_id);
+        let chain_active = self.is_chain_active(event.dest_chain_id.0).await;
 
         // 3. Resolve destination RPC and contract addresses from config.
         let dest_rpc = match self.config.rpc_urls.get(&event.dest_chain_id.0) {

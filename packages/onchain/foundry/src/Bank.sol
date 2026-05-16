@@ -44,6 +44,8 @@ contract Bank is Initializable, AccessControlUpgradeable, PausableUpgradeable, R
     error InsufficientReserveLiquidity();
     error ReserveBridgeMessageAlreadyProcessed(bytes32 messageId);
     error UnauthorizedReserveBridge(address caller);
+    error ContractFrozenForDecommission();
+    error ContractPermanentlyPaused();
 
     // ── Roles ──────────────────────────────────────────────────────────
 
@@ -122,6 +124,8 @@ contract Bank is Initializable, AccessControlUpgradeable, PausableUpgradeable, R
 
     /// @notice Emitted when USDC reserve bridging is completed.
     event ReserveBridgeCompleted(bytes32 indexed messageId, uint64 indexed sourceChainId, uint256 amount);
+    event FrozenForDecommission(address indexed account);
+    event PermanentlyPaused(address indexed account);
 
     // ── State ──────────────────────────────────────────────────────────
 
@@ -173,6 +177,17 @@ contract Bank is Initializable, AccessControlUpgradeable, PausableUpgradeable, R
     /// @notice Destination Bank/reserve address per chain for outbound reserve bridge operations.
     mapping(uint64 => address) public reserveDestinations;
 
+    /// @notice One-way decommission freeze. Blocks new user/hot-path operations but leaves drain functions live.
+    bool public frozen;
+
+    /// @notice Permanent pause flag. Once set, `unpause` is disabled.
+    bool public permanentPause;
+
+    modifier whenNotFrozenForDecommission() {
+        if (frozen) revert ContractFrozenForDecommission();
+        _;
+    }
+
     // ── Constructor ────────────────────────────────────────────────────
 
     /// @custom:oz-upgrades-unsafe-allow constructor
@@ -208,7 +223,12 @@ contract Bank is Initializable, AccessControlUpgradeable, PausableUpgradeable, R
     ///      Token must be on the allowlist and have exactly 6 decimals.
     /// @param underlyingToken The accepted collateral token (e.g. USDC).
     /// @param amount          Amount of underlying token to deposit.
-    function deposit(address underlyingToken, uint256 amount) external whenNotPaused nonReentrant {
+    function deposit(address underlyingToken, uint256 amount)
+        external
+        whenNotPaused
+        whenNotFrozenForDecommission
+        nonReentrant
+    {
         if (!allowedTokens[underlyingToken]) revert TokenNotAllowed(underlyingToken);
         if (amount == 0) revert ZeroAmount();
         uint8 decimals = IERC20Metadata(underlyingToken).decimals();
@@ -242,6 +262,7 @@ contract Bank is Initializable, AccessControlUpgradeable, PausableUpgradeable, R
     function transferHotPath(address to, uint256 amount, uint256 destinationChainId)
         external
         whenNotPaused
+        whenNotFrozenForDecommission
         nonReentrant
     {
         if (to == address(0)) revert ZeroAddress();
@@ -263,6 +284,7 @@ contract Bank is Initializable, AccessControlUpgradeable, PausableUpgradeable, R
     function releaseHotPath(address to, uint256 amount, bytes32 sourceEventHash)
         external
         whenNotPaused
+        whenNotFrozenForDecommission
         nonReentrant
         onlyRole(RELAYER_ROLE)
     {
@@ -469,7 +491,23 @@ contract Bank is Initializable, AccessControlUpgradeable, PausableUpgradeable, R
 
     /// @notice Unpauses the contract.
     function unpause() external onlyRole(PAUSER_ROLE) {
+        if (permanentPause) revert ContractPermanentlyPaused();
         _unpause();
+    }
+
+    /// @notice One-shot governance freeze for chain decommissioning.
+    function freezeForDecommission() external onlyRole(ADMIN_ROLE) {
+        if (frozen) revert ContractFrozenForDecommission();
+        frozen = true;
+        emit FrozenForDecommission(msg.sender);
+    }
+
+    /// @notice Permanently pause all state-changing Bank operations after drain completion.
+    function pausePermanently() external onlyRole(ADMIN_ROLE) {
+        if (permanentPause) revert ContractPermanentlyPaused();
+        permanentPause = true;
+        _pause();
+        emit PermanentlyPaused(msg.sender);
     }
 
     // ── UUPS ───────────────────────────────────────────────────────────

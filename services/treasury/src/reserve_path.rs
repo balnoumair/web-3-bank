@@ -82,7 +82,9 @@ pub struct ReservePath {
     bridge_in_selector: [u8; 4],
 
     activation_topic: B256,
+    decommission_finalized_topic: B256,
     reserve_bridge_completed_topic: B256,
+    decommissioned_chains: Arc<RwLock<HashSet<ChainId>>>,
 
     max_wei_per_op: Option<U256>,
     bridge_fee_wei: U256,
@@ -114,6 +116,7 @@ impl ReservePath {
 
         let activation_topic =
             keccak256(b"ActivationPublished(string,string,string,uint256,string,string,uint256)");
+        let decommission_finalized_topic = keccak256(b"ChainDecommissionFinalized(uint256)");
         let reserve_bridge_completed_topic =
             keccak256(b"ReserveBridgeCompleted(bytes32,uint64,uint256)");
 
@@ -150,7 +153,9 @@ impl ReservePath {
             bridge_reserve_selector,
             bridge_in_selector,
             activation_topic,
+            decommission_finalized_topic,
             reserve_bridge_completed_topic,
+            decommissioned_chains: Arc::new(RwLock::new(HashSet::new())),
             max_wei_per_op,
             bridge_fee_wei,
         })
@@ -184,7 +189,8 @@ impl ReservePath {
             }
         };
         let mut last_block: u64 = 0;
-        let topic = format!("{}", self.activation_topic);
+        let activation_topic = format!("{}", self.activation_topic);
+        let decommission_topic = format!("{}", self.decommission_finalized_topic);
         info!("reserve_path: route receiver polling started");
 
         loop {
@@ -203,7 +209,7 @@ impl ReservePath {
                 &self.http,
                 &rpc_url,
                 &self.config.route_receiver_address,
-                &topic,
+                &activation_topic,
                 from,
                 to_block,
             )
@@ -214,6 +220,31 @@ impl ReservePath {
                     let converted: HashSet<ChainId> = chains.into_iter().map(ChainId).collect();
                     info!(chains = ?converted, "reserve_path: activation set updated");
                     *self.active_chains.write().await = converted;
+                }
+            }
+
+            let decommission_logs = eth::fetch_logs(
+                &self.http,
+                &rpc_url,
+                &self.config.route_receiver_address,
+                &decommission_topic,
+                from,
+                to_block,
+            )
+            .await;
+
+            for log in &decommission_logs {
+                if log.topics.len() < 2 {
+                    continue;
+                }
+                if let Some(chain_id) = eth::decode_indexed_u64_topic(&log.topics[1]) {
+                    let chain = ChainId(chain_id);
+                    self.decommissioned_chains.write().await.insert(chain);
+                    self.active_chains.write().await.remove(&chain);
+                    info!(
+                        chain = chain_id,
+                        "reserve_path: chain finalized as decommissioned"
+                    );
                 }
             }
 
@@ -238,13 +269,16 @@ impl ReservePath {
 
     async fn run_planner_cycle(&self) {
         let active = self.active_chains.read().await.clone();
+        let decommissioned = self.decommissioned_chains.read().await.clone();
 
         let chains: Vec<(ChainId, String, String)> = self
             .config
             .rpc_urls
             .iter()
             .filter_map(|(&chain_id, rpc_url)| {
-                if !active.contains(&ChainId(chain_id)) {
+                if !active.contains(&ChainId(chain_id))
+                    || decommissioned.contains(&ChainId(chain_id))
+                {
                     return None;
                 }
                 self.config
@@ -733,11 +767,12 @@ impl ReservePath {
 
     async fn run_watcher_cycle(&self, stuck_timeout: Duration) {
         let active = self.active_chains.read().await.clone();
+        let decommissioned = self.decommissioned_chains.read().await.clone();
         let topic = format!("{}", self.reserve_bridge_completed_topic);
 
         for (&chain_id_raw, rpc_url) in self.config.rpc_urls.iter() {
             let chain_id = ChainId(chain_id_raw);
-            if !active.contains(&chain_id) {
+            if !active.contains(&chain_id) || decommissioned.contains(&chain_id) {
                 continue;
             }
             let Some(bank_addr) = self.config.contract_addresses.get(&chain_id_raw) else {

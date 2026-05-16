@@ -73,6 +73,10 @@ pub struct ColdPath {
     rebalance_selector: [u8; 4],
     /// keccak256("ActivationPublished(string,string,string,uint256,string,string,uint256)")
     activation_topic: B256,
+    /// keccak256("ChainDecommissionFinalized(uint256)")
+    decommission_finalized_topic: B256,
+    /// Chain IDs finalized by governance as decommissioned.
+    decommissioned_chains: Arc<RwLock<HashSet<ChainId>>>,
     /// Maximum SyncUSD (in wei) per rebalance operation. `None` = no cap.
     max_wei_per_op: Option<U256>,
     /// ETH (in wei) to include as `msg.value` for CCIP fees.
@@ -109,6 +113,7 @@ impl ColdPath {
 
         let activation_topic =
             keccak256(b"ActivationPublished(string,string,string,uint256,string,string,uint256)");
+        let decommission_finalized_topic = keccak256(b"ChainDecommissionFinalized(uint256)");
 
         let max_wei_per_op = if config.cold_path_max_wei.is_empty() {
             None
@@ -143,6 +148,8 @@ impl ColdPath {
             max_rebalance_amount_selector,
             rebalance_selector,
             activation_topic,
+            decommission_finalized_topic,
+            decommissioned_chains: Arc::new(RwLock::new(HashSet::new())),
             max_wei_per_op,
             ccip_fee_wei,
             stuck_message_timeout,
@@ -184,7 +191,8 @@ impl ColdPath {
         };
 
         let mut last_block: u64 = 0;
-        let topic = format!("{}", self.activation_topic);
+        let activation_topic = format!("{}", self.activation_topic);
+        let decommission_topic = format!("{}", self.decommission_finalized_topic);
         info!("cold_path: route receiver polling started");
 
         loop {
@@ -204,7 +212,7 @@ impl ColdPath {
                 &self.http,
                 &rpc_url,
                 &self.config.route_receiver_address,
-                &topic,
+                &activation_topic,
                 scan_from,
                 to_block,
             )
@@ -222,6 +230,31 @@ impl ColdPath {
                 }
             }
 
+            let decommission_logs = eth::fetch_logs(
+                &self.http,
+                &rpc_url,
+                &self.config.route_receiver_address,
+                &decommission_topic,
+                scan_from,
+                to_block,
+            )
+            .await;
+
+            for log in &decommission_logs {
+                if log.topics.len() < 2 {
+                    continue;
+                }
+                if let Some(chain_id) = eth::decode_indexed_u64_topic(&log.topics[1]) {
+                    let chain = ChainId(chain_id);
+                    self.decommissioned_chains.write().await.insert(chain);
+                    self.active_chains.write().await.remove(&chain);
+                    info!(
+                        chain = chain_id,
+                        "cold_path: chain finalized as decommissioned"
+                    );
+                }
+            }
+
             last_block = to_block + 1;
             tokio::time::sleep(ROUTE_RECEIVER_POLL_INTERVAL).await;
         }
@@ -231,6 +264,7 @@ impl ColdPath {
 
     async fn run_rebalance_cycle(&self) {
         let active = self.active_chains.read().await.clone();
+        let decommissioned = self.decommissioned_chains.read().await.clone();
 
         // Collect chain info for active chains that have both an RPC and a contract address.
         let chains: Vec<(ChainId, String, String)> = self
@@ -238,7 +272,9 @@ impl ColdPath {
             .rpc_urls
             .iter()
             .filter_map(|(&chain_id, rpc_url)| {
-                if !active.contains(&ChainId(chain_id)) {
+                if !active.contains(&ChainId(chain_id))
+                    || decommissioned.contains(&ChainId(chain_id))
+                {
                     return None;
                 }
                 self.config

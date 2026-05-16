@@ -1,6 +1,7 @@
 mod cold_path;
 mod config;
 mod db;
+pub mod decommission;
 pub mod domain;
 mod error;
 mod eth;
@@ -95,6 +96,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let snapshot_repo = Arc::new(db::PgPoolSnapshotRepository::new(pool.clone()));
     let reserve_repo: Arc<dyn crate::domain::repository::ReserveRepository> =
         Arc::new(db::PgReserveRepository::new(pool.clone()));
+    let _decommission_repo: Arc<dyn crate::domain::repository::DecommissionRepository> =
+        Arc::new(db::PgDecommissionRepository::new(pool.clone()));
 
     let hot_path = HotPath::new(Arc::clone(&relay_repo), Arc::clone(&cfg), http.clone());
     let pool_manager = PoolManager::new(snapshot_repo, Arc::clone(&cfg), http.clone());

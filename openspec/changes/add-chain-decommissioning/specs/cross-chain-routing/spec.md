@@ -24,6 +24,18 @@ When a chain is marked for decommissioning, the Treasury Service SHALL execute a
 
 The drain procedure SHALL be resumable: restart MUST skip already-completed holder bridges based on the audit table.
 
+#### Scenario: Treasury resumes after a partial holder drain
+
+- **WHEN** the decommission orchestrator restarts after one holder bridge is recorded as completed
+- **THEN** Treasury SHALL skip the completed holder
+- **AND** Treasury SHALL continue draining remaining holders before pool and reserve drain steps
+
 ### Requirement: Drain respects activation gate of the target chain
 
 If the drain target chain becomes `inactive` during a drain, Treasury SHALL pause the drain and alert operators. The drain SHALL NOT proceed against an inactive target.
+
+#### Scenario: Target chain becomes inactive during drain
+
+- **WHEN** Treasury detects the selected drain target chain is inactive
+- **THEN** Treasury SHALL pause the drain before submitting additional bridge operations
+- **AND** Treasury SHALL alert operators for manual governance review

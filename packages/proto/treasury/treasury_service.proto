@@ -19,6 +19,7 @@ service TreasuryService {
 
   // RouteReceiver-derived activation set (same view the hot-path relayer uses).
   rpc IsChainActive(IsChainActiveRequest) returns (IsChainActiveResponse);
+  rpc IsChainDecommissioned(IsChainDecommissionedRequest) returns (IsChainDecommissionedResponse);
 }
 
 message HealthCheckRequest {}
@@ -67,4 +68,11 @@ message IsChainActiveRequest {
 }
 message IsChainActiveResponse {
   bool active = 1;
+}
+
+message IsChainDecommissionedRequest {
+  uint64 chain_id = 1;
+}
+message IsChainDecommissionedResponse {
+  bool decommissioned = 1;
 }

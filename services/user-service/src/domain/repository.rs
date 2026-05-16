@@ -40,6 +40,14 @@ pub trait UserRepository: Send + Sync {
         tempo_address: &TempoAddress,
         chain_id: i64,
     ) -> Result<(), DomainError>;
+
+    /// Governance decommission override. This is the only path that may mutate an existing home_chain.
+    async fn set_home_chain_for_decommission(
+        &self,
+        tempo_address: &TempoAddress,
+        chain_id: i64,
+        operator: &str,
+    ) -> Result<(), DomainError>;
 }
 
 #[async_trait]

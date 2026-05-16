@@ -22,3 +22,10 @@ Freeze SHALL NOT be reversible.
 ### Requirement: Bank Contract supports permanent pause
 
 Bank Contracts SHALL expose an admin-only `pausePermanently()` function, called by governance after drain completes. The contract SHALL use the existing `Pausable` mechanism but SHALL NOT support unpause from the permanent state. After permanent pause, all operations SHALL revert.
+
+#### Scenario: Permanently paused Bank Contract cannot be unpaused
+
+- **WHEN** governance calls `pausePermanently()` after drain completion
+- **AND** a pauser attempts to call `unpause()`
+- **THEN** the call SHALL revert
+- **AND** the Bank Contract SHALL remain paused

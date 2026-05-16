@@ -186,6 +186,56 @@ pub trait ReserveRepository: Send + Sync {
     async fn list_stuck(&self, stuck_after_secs: i64) -> Vec<ReserveOpRow>;
 }
 
+// ── Decommission repository ─────────────────────────────────────────────────
+
+/// Audit row status for `treasury.decommission_ops`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DecommissionOpStatus {
+    Pending,
+    Submitted,
+    Completed,
+    Paused,
+    Failed,
+}
+
+impl DecommissionOpStatus {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Pending => "pending",
+            Self::Submitted => "submitted",
+            Self::Completed => "completed",
+            Self::Paused => "paused",
+            Self::Failed => "failed",
+        }
+    }
+}
+
+#[async_trait]
+pub trait DecommissionRepository: Send + Sync {
+    async fn completed_holders(&self, source_chain: ChainId, target_chain: ChainId) -> Vec<String>;
+
+    async fn insert_holder_op(
+        &self,
+        op_id: &OperationId,
+        source_chain: ChainId,
+        target_chain: ChainId,
+        holder_address: &str,
+        amount: &U256,
+        status: DecommissionOpStatus,
+    );
+
+    async fn mark_holder_submitted(
+        &self,
+        op_id: &OperationId,
+        src_message_id: Option<&str>,
+        dst_tx_hash: Option<&TxHash>,
+    );
+
+    async fn mark_holder_completed(&self, op_id: &OperationId);
+
+    async fn mark_op_failed(&self, op_id: &OperationId, failure_reason: &str);
+}
+
 // ── Pool snapshot repository ────────────────────────────────────────────────
 
 #[async_trait]
