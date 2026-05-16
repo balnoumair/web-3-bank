@@ -19,3 +19,9 @@
 ### Requirement: CRE excludes decommissioned chains from scoring
 
 The CRE Orchestrator SHALL skip decommissioned chains entirely. It SHALL NOT fetch metrics for them, SHALL NOT include them in published activation state, and SHALL NOT produce scores for them.
+
+#### Scenario: Decommissioned chain is omitted from activation output
+
+- **WHEN** CRE is given a chain list that includes a `decommissioned` chain
+- **THEN** CRE SHALL omit that chain from scoring
+- **AND** CRE SHALL NOT include that chain in either the active or inactive published activation sets

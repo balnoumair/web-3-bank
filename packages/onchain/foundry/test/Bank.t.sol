@@ -54,7 +54,7 @@ contract MockReserveBridge is IReserveBridge {
         emit MockBridgeOut(msg.sender, destChainId, destReserve, amount, messageId);
     }
 
-    function bridgeIn(bytes calldata message, bytes calldata /* attestation */)
+    function bridgeIn(bytes calldata message, bytes calldata /* attestation */ )
         external
         pure
         returns (bytes32 messageId)
@@ -166,6 +166,8 @@ contract BankTest is Test {
         bytes32 indexed messageId, uint64 indexed destChainId, uint256 amount, bytes32 indexed bridgeType
     );
     event ReserveBridgeCompleted(bytes32 indexed messageId, uint64 indexed sourceChainId, uint256 amount);
+    event FrozenForDecommission(address indexed account);
+    event PermanentlyPaused(address indexed account);
 
     // ── Setup ──────────────────────────────────────────────────────────
 
@@ -1179,5 +1181,125 @@ contract BankTest is Test {
         vm.prank(unauthorized);
         vm.expectRevert();
         bank.upgradeToAndCall(address(newImpl), "");
+    }
+
+    // ── Decommission freeze ────────────────────────────────────────────
+
+    function test_adminCanFreezeForDecommissionOnce() public {
+        vm.expectEmit(true, false, false, false);
+        emit FrozenForDecommission(admin);
+
+        vm.prank(admin);
+        bank.freezeForDecommission();
+        assertTrue(bank.frozen());
+
+        vm.prank(admin);
+        vm.expectRevert(Bank.ContractFrozenForDecommission.selector);
+        bank.freezeForDecommission();
+    }
+
+    function test_nonAdminCannotFreezeForDecommission() public {
+        vm.prank(unauthorized);
+        vm.expectRevert();
+        bank.freezeForDecommission();
+    }
+
+    function test_frozenDepositReverts() public {
+        vm.prank(admin);
+        bank.freezeForDecommission();
+
+        vm.startPrank(user);
+        usdc.approve(address(bank), 100e6);
+        vm.expectRevert(Bank.ContractFrozenForDecommission.selector);
+        bank.deposit(address(usdc), 100e6);
+        vm.stopPrank();
+    }
+
+    function test_frozenTransferHotPathReverts() public {
+        _giveUserSyncUSD(100e6);
+
+        vm.prank(admin);
+        bank.freezeForDecommission();
+
+        vm.startPrank(user);
+        syncUSD.approve(address(bank), 100e6);
+        vm.expectRevert(Bank.ContractFrozenForDecommission.selector);
+        bank.transferHotPath(recipient, 100e6, 42);
+        vm.stopPrank();
+    }
+
+    function test_frozenReleaseHotPathReverts() public {
+        _fundPool(100e6);
+
+        vm.prank(admin);
+        bank.freezeForDecommission();
+
+        vm.prank(relayer);
+        vm.expectRevert(Bank.ContractFrozenForDecommission.selector);
+        bank.releaseHotPath(recipient, 100e6, bytes32(uint256(1)));
+    }
+
+    function test_frozenWithdrawStillAllowed() public {
+        _depositForUser(100e6);
+
+        vm.prank(admin);
+        bank.freezeForDecommission();
+
+        vm.startPrank(user);
+        syncUSD.approve(address(bank), 100e6);
+        bank.withdraw(address(usdc), 100e6);
+        vm.stopPrank();
+
+        assertEq(syncUSD.balanceOf(user), 0);
+        assertEq(usdc.balanceOf(user), 10_000e6);
+    }
+
+    function test_frozenRebalanceStillAllowed() public {
+        _fundPool(100e6);
+        vm.prank(admin);
+        bank.setMaxRebalanceAmount(100e6);
+        vm.prank(admin);
+        bank.setAllowlistedDestChain(42, true);
+        vm.prank(admin);
+        bank.freezeForDecommission();
+
+        vm.prank(rebalancer);
+        bytes32 messageId = bank.rebalance(42, 100e6);
+
+        assertTrue(messageId != bytes32(0));
+        assertEq(bank.poolDepth(), 0);
+    }
+
+    function test_frozenBridgeReserveStillAllowed() public {
+        _depositReserve(100e6);
+        _configureReserveBridge(100e6);
+        vm.prank(admin);
+        bank.freezeForDecommission();
+
+        vm.prank(reserveRebalancer);
+        bytes32 messageId = bank.bridgeReserve(42, 100e6);
+
+        assertTrue(messageId != bytes32(0));
+        assertEq(bank.reserveDepth(), 0);
+    }
+
+    function test_adminCanPausePermanentlyAndCannotUnpause() public {
+        vm.expectEmit(true, false, false, false);
+        emit PermanentlyPaused(admin);
+
+        vm.prank(admin);
+        bank.pausePermanently();
+        assertTrue(bank.paused());
+        assertTrue(bank.permanentPause());
+
+        vm.prank(pauser);
+        vm.expectRevert(Bank.ContractPermanentlyPaused.selector);
+        bank.unpause();
+    }
+
+    function test_nonAdminCannotPausePermanently() public {
+        vm.prank(unauthorized);
+        vm.expectRevert();
+        bank.pausePermanently();
     }
 }

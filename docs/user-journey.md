@@ -9,6 +9,7 @@
 **What Bob does:** Taps "Create Account".
 
 **What happens internally:**
+
 ```
 Bob's Browser                    Tempo Chain
     │                                │
@@ -48,6 +49,7 @@ Bob's Browser                    Tempo Chain
 **What Bob does:** FaceID prompt → scans face.
 
 **What happens internally:**
+
 ```
 Bob's Browser                    Tempo Chain                    Treasury Service
     │                                │                              │
@@ -121,7 +123,7 @@ Charlie is on Base. Bob doesn't know this. Bob doesn't care.
 
 **What Bob does:** FaceID prompt → scans face.
 
-**What happens internally:** Before Bob signs, the BFF resolves Charlie’s **home chain** from the User Service (set on Charlie’s first deposit, pushed by Treasury). The GraphQL response includes the `destChainId` the wallet must pass into `transferHotPath`. If Charlie has no profile yet, his home chain is unknown, or RouteReceiver marks his home chain inactive, the BFF falls back to Bob’s current chain so delivery is never blocked.
+**What happens internally:** Before Bob signs, the BFF resolves Charlie’s **home chain** from the User Service (set on Charlie’s first deposit, pushed by Treasury). The GraphQL response includes the `destChainId` the wallet must pass into `transferHotPath`. If Charlie has no profile yet, his home chain is unknown, or RouteReceiver marks his home chain inactive or decommissioned, the BFF falls back to Bob’s current chain so delivery is never blocked.
 
 ```
 Bob's Browser          Tempo Chain              Treasury Service           Base Chain
@@ -197,6 +199,7 @@ Bob's Browser          Tempo Chain              Treasury Service           Base 
 Nobody triggers this. Nobody sees this. It just happens.
 
 **What happens internally:**
+
 ```
 CRE Orchestrator              RouteReceiver.sol          Treasury Service            CCIP Network
     │                              │                          │                          │
@@ -246,6 +249,7 @@ CRE Orchestrator              RouteReceiver.sol          Treasury Service       
 A real scenario: Arbitrum's sequencer goes offline for 3 hours.
 
 **What happens internally:**
+
 ```
 CRE Orchestrator              RouteReceiver.sol          Treasury Service
     │                              │                          │
@@ -283,6 +287,7 @@ CRE Orchestrator              RouteReceiver.sol          Treasury Service
 **What Bob does:** FaceID prompt → scans face.
 
 **What happens internally:**
+
 ```
 Bob's Browser                    Tempo Chain
     │                                │
@@ -310,4 +315,5 @@ Bob's Browser                    Tempo Chain
 **Bob creates an account with his face, deposits dollars, sends money to people, and withdraws — exactly like a banking app.** He never sees a chain name, a gas fee, a transaction hash, a token symbol, or a seed phrase. Under the hood, 4 services, 3+ blockchains, CCIP, a scoring engine, and a relayer network are making it all work.
 
 ---
-*Last updated: March 2026*
+
+_Last updated: March 2026_

@@ -13,7 +13,7 @@ async function resolveHotPathDestChainId(
   userService: IUserService,
   treasuryService: ITreasuryService,
   recipientTempoAddress: string,
-  senderChainId: number
+  senderChainId: number,
 ): Promise<string> {
   let home: bigint | undefined;
   try {
@@ -27,12 +27,20 @@ async function resolveHotPathDestChainId(
   }
 
   let homeActive = true;
+  let homeDecommissioned = false;
   if (home !== undefined) {
     try {
       homeActive = await treasuryService.isChainActive(Number(home));
+      homeDecommissioned = await treasuryService.isChainDecommissioned(
+        Number(home),
+      );
     } catch (e) {
-      console.warn("treasury IsChainActive failed — falling back to same-chain:", e);
+      console.warn(
+        "treasury IsChainActive failed — falling back to same-chain:",
+        e,
+      );
       homeActive = false;
+      homeDecommissioned = false;
     }
   }
 
@@ -40,6 +48,7 @@ async function resolveHotPathDestChainId(
     senderChainId: BigInt(senderChainId),
     recipientHomeChainId: home,
     recipientHomeChainActive: homeActive,
+    recipientHomeChainDecommissioned: homeDecommissioned,
   });
   return dest.toString();
 }
@@ -50,7 +59,7 @@ async function resolveHotPathDestChainId(
  */
 export function makeQueryUseCases(
   userService: IUserService,
-  treasuryService: ITreasuryService
+  treasuryService: ITreasuryService,
 ) {
   return {
     getMe: async (address: string): Promise<UserRecord> => {
@@ -64,28 +73,26 @@ export function makeQueryUseCases(
     getPoolDepths: (chainId: number): Promise<PoolDepth> =>
       treasuryService.getPoolDepth(chainId),
 
-    getRecentTransfers: (
-      address: string,
-      limit: number
-    ): Promise<Transfer[]> => treasuryService.getRecentTransfers(address, limit),
+    getRecentTransfers: (address: string, limit: number): Promise<Transfer[]> =>
+      treasuryService.getRecentTransfers(address, limit),
 
     resolveUsername: async (
       username: string,
-      senderChainId: number
+      senderChainId: number,
     ): Promise<UserRecord> => {
       const u = await userService.getUserByUsername(username);
       const destChainId = await resolveHotPathDestChainId(
         userService,
         treasuryService,
         u.tempoAddress,
-        senderChainId
+        senderChainId,
       );
       return { ...u, destChainId };
     },
 
     resolveRecipientRouting: async (
       tempoAddress: string,
-      senderChainId: number
+      senderChainId: number,
     ): Promise<{ tempoAddress: string; destChainId: string }> => {
       const trimmed = tempoAddress.trim();
       if (!/^0x[0-9a-fA-F]{40}$/.test(trimmed)) {
@@ -96,7 +103,7 @@ export function makeQueryUseCases(
         userService,
         treasuryService,
         normalized,
-        senderChainId
+        senderChainId,
       );
       return { tempoAddress: normalized, destChainId };
     },

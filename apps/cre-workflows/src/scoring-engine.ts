@@ -21,6 +21,7 @@ type ScoreRunV1Args = {
   customerId: string;
   scenario: ScenarioName;
   allowedChains: string[];
+  decommissionedChains?: string[];
   chainMetrics: ScoringV1ChainMetricsInput[];
 };
 
@@ -45,10 +46,11 @@ const componentKeyByMetricKey: Record<
   liquidityRaw: "liquidity",
 };
 
-const scenarioReasonCodeByScenario: Record<ScenarioName, ScoringV1ReasonCode> = {
-  normal: "SCENARIO_NORMAL",
-  congested: "SCENARIO_CONGESTED",
-};
+const scenarioReasonCodeByScenario: Record<ScenarioName, ScoringV1ReasonCode> =
+  {
+    normal: "SCENARIO_NORMAL",
+    congested: "SCENARIO_CONGESTED",
+  };
 
 const missingReasonCodeByMetricKey: Record<
   ScoringV1InputMetricKey,
@@ -128,14 +130,21 @@ function buildCompletedMetrics(args: {
 }
 
 export function scoreRunV1(args: ScoreRunV1Args): ScoreResult {
-  if (args.allowedChains.length === 0) {
+  const decommissionedChains = new Set(args.decommissionedChains ?? []);
+  const scoreableChains = args.allowedChains.filter(
+    (chain) => !decommissionedChains.has(chain),
+  );
+
+  if (scoreableChains.length === 0) {
     throw new Error("scoreRunV1 requires at least one allowed chain");
   }
 
   const { completedMetrics, seenMissingMetricKeys } = buildCompletedMetrics({
     scenario: args.scenario,
-    allowedChains: args.allowedChains,
-    chainMetrics: args.chainMetrics,
+    allowedChains: scoreableChains,
+    chainMetrics: args.chainMetrics.filter(
+      (metric) => !decommissionedChains.has(metric.chain),
+    ),
   });
 
   const bounds = SCORING_V1_INPUT_METRIC_KEYS.reduce(
@@ -286,6 +295,7 @@ export function scoreRunV1(args: ScoreRunV1Args): ScoreResult {
 export function classifyActivationByThreshold(args: {
   threshold: number;
   ranked: RankedChain[];
+  decommissionedChains?: string[];
 }): ActivationDecision {
   if (args.threshold < 0 || args.threshold > 1) {
     throw new Error("activation threshold must be between 0 and 1");
@@ -293,8 +303,12 @@ export function classifyActivationByThreshold(args: {
 
   const activeChains: string[] = [];
   const inactiveChains: string[] = [];
+  const decommissionedChains = new Set(args.decommissionedChains ?? []);
 
   for (const entry of args.ranked) {
+    if (decommissionedChains.has(entry.chain)) {
+      continue;
+    }
     if (entry.score >= args.threshold) {
       activeChains.push(entry.chain);
     } else {

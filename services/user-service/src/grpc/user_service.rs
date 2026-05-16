@@ -52,6 +52,25 @@ fn domain_err_to_status(e: DomainError) -> Status {
 pub struct UserServiceImpl {
     pub user_repo: Arc<dyn UserRepository>,
     pub credential_repo: Arc<dyn CredentialRepository>,
+    pub decommission_orchestrator_token: Option<String>,
+}
+
+impl UserServiceImpl {
+    fn decommission_override_denial<T>(&self, request: &Request<T>) -> Option<&'static str> {
+        let Some(expected) = self.decommission_orchestrator_token.as_deref() else {
+            return Some("decommission home-chain override is not configured");
+        };
+        let provided = request
+            .metadata()
+            .get("x-decommission-orchestrator-token")
+            .and_then(|value| value.to_str().ok());
+
+        if provided == Some(expected) {
+            None
+        } else {
+            Some("invalid decommission orchestrator token")
+        }
+    }
 }
 
 #[tonic::async_trait]
@@ -365,14 +384,32 @@ impl UserService for UserServiceImpl {
         &self,
         request: Request<SetUserHomeChainRequest>,
     ) -> Result<Response<SetUserHomeChainResponse>, Status> {
+        if request.get_ref().decommission_override {
+            if let Some(message) = self.decommission_override_denial(&request) {
+                return Err(Status::permission_denied(message));
+            }
+        }
+
         let req = request.into_inner();
         let addr =
             TempoAddress::try_from(req.tempo_address.as_str()).map_err(domain_err_to_status)?;
 
-        self.user_repo
-            .set_home_chain_if_unset(&addr, req.chain_id as i64)
-            .await
-            .map_err(domain_err_to_status)?;
+        if req.decommission_override {
+            let operator = if req.operator.trim().is_empty() {
+                "treasury-decommission-orchestrator"
+            } else {
+                req.operator.trim()
+            };
+            self.user_repo
+                .set_home_chain_for_decommission(&addr, req.chain_id as i64, operator)
+                .await
+                .map_err(domain_err_to_status)?;
+        } else {
+            self.user_repo
+                .set_home_chain_if_unset(&addr, req.chain_id as i64)
+                .await
+                .map_err(domain_err_to_status)?;
+        }
 
         Ok(Response::new(SetUserHomeChainResponse {}))
     }
@@ -393,6 +430,7 @@ mod tests {
         let svc = UserServiceServer::new(UserServiceImpl {
             user_repo: Arc::new(PgUserRepository::new(pool.clone())),
             credential_repo: Arc::new(PgCredentialRepository::new(pool)),
+            decommission_orchestrator_token: Some("test-decommission-token".to_string()),
         });
         tokio::spawn(async move {
             Server::builder()
@@ -751,6 +789,8 @@ mod tests {
             .set_user_home_chain(SetUserHomeChainRequest {
                 tempo_address: tempo.to_string(),
                 chain_id: 1337,
+                decommission_override: false,
+                operator: String::new(),
             })
             .await
             .unwrap();
@@ -771,6 +811,8 @@ mod tests {
             .set_user_home_chain(SetUserHomeChainRequest {
                 tempo_address: tempo.to_string(),
                 chain_id: 9999,
+                decommission_override: false,
+                operator: String::new(),
             })
             .await
             .unwrap();
@@ -784,6 +826,76 @@ mod tests {
             .unwrap()
             .into_inner();
         assert_eq!(still.chain_id, 1337);
+    }
+
+    #[sqlx::test]
+    async fn test_decommission_override_requires_token_and_audits(pool: PgPool) {
+        let addr = start_test_server(pool.clone()).await;
+        let tempo = "0x1212121212121212121212121212121212121212";
+        client(&addr)
+            .await
+            .create_user(CreateUserRequest {
+                display_name: Some("Dina".to_string()),
+                credential_id: b"cred-decom".to_vec(),
+                public_key: b"pk-decom".to_vec(),
+                tempo_address: tempo.to_string(),
+            })
+            .await
+            .unwrap();
+
+        client(&addr)
+            .await
+            .set_user_home_chain(SetUserHomeChainRequest {
+                tempo_address: tempo.to_string(),
+                chain_id: 1337,
+                decommission_override: false,
+                operator: String::new(),
+            })
+            .await
+            .unwrap();
+
+        let err = client(&addr)
+            .await
+            .set_user_home_chain(SetUserHomeChainRequest {
+                tempo_address: tempo.to_string(),
+                chain_id: 9999,
+                decommission_override: true,
+                operator: "treasury-test".to_string(),
+            })
+            .await
+            .unwrap_err();
+        assert_eq!(err.code(), tonic::Code::PermissionDenied);
+
+        let mut req = tonic::Request::new(SetUserHomeChainRequest {
+            tempo_address: tempo.to_string(),
+            chain_id: 9999,
+            decommission_override: true,
+            operator: "treasury-test".to_string(),
+        });
+        req.metadata_mut().insert(
+            "x-decommission-orchestrator-token",
+            "test-decommission-token".parse().unwrap(),
+        );
+        client(&addr).await.set_user_home_chain(req).await.unwrap();
+
+        let updated = client(&addr)
+            .await
+            .get_user_home_chain(GetUserHomeChainRequest {
+                tempo_address: tempo.to_string(),
+            })
+            .await
+            .unwrap()
+            .into_inner();
+        assert_eq!(updated.chain_id, 9999);
+
+        let count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM users.home_chain_audit WHERE tempo_address = $1",
+        )
+        .bind(tempo)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(count, 1);
     }
 
     #[sqlx::test]

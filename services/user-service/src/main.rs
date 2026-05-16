@@ -53,6 +53,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .add_service(UserServiceServer::new(UserServiceImpl {
             user_repo,
             credential_repo,
+            decommission_orchestrator_token: config.decommission_orchestrator_token.clone(),
         }))
         .serve(addr)
         .await?;

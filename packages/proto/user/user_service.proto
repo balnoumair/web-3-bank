@@ -122,5 +122,8 @@ message GetUserHomeChainResponse {
 message SetUserHomeChainRequest {
   string tempo_address = 1;
   uint64 chain_id = 2;
+  // False/default: first-deposit sticky set only. True: Treasury decommission override.
+  bool decommission_override = 3;
+  string operator = 4;
 }
 message SetUserHomeChainResponse {}

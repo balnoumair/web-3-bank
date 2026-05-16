@@ -118,6 +118,15 @@ pub fn decode_active_chains_from_event(hex_data: &str) -> Option<HashSet<u64>> {
     )
 }
 
+/// Decode a uint64 stored as an indexed event topic (`bytes32` ABI word).
+pub fn decode_indexed_u64_topic(topic: &str) -> Option<u64> {
+    let data = decode_hex(topic)?;
+    if data.len() != 32 {
+        return None;
+    }
+    Some(u64::from_be_bytes(data[24..32].try_into().ok()?))
+}
+
 // ── Tests ────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -148,5 +157,11 @@ mod tests {
     #[test]
     fn decode_hex_odd_length_returns_none() {
         assert_eq!(decode_hex("abc"), None);
+    }
+
+    #[test]
+    fn decode_indexed_u64_topic_reads_low_word() {
+        let topic = "0x0000000000000000000000000000000000000000000000000000000000014a34";
+        assert_eq!(decode_indexed_u64_topic(topic), Some(84532));
     }
 }

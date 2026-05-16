@@ -163,6 +163,62 @@ impl UserRepository for PgUserRepository {
         .map_err(sqlx_to_domain)?;
         Ok(())
     }
+
+    async fn set_home_chain_for_decommission(
+        &self,
+        tempo_address: &TempoAddress,
+        chain_id: i64,
+        operator: &str,
+    ) -> Result<(), DomainError> {
+        let mut tx = self.pool.begin().await.map_err(sqlx_to_domain)?;
+
+        let previous_chain = sqlx::query_scalar::<_, Option<i64>>(
+            "SELECT u.home_chain FROM users.users u
+             INNER JOIN users.credentials c ON c.user_id = u.id
+             WHERE c.tempo_address = $1 AND c.revoked_at IS NULL
+             LIMIT 1",
+        )
+        .bind(tempo_address.as_str())
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(sqlx_to_domain)?
+        .flatten();
+
+        let result = sqlx::query(
+            "UPDATE users.users u
+             SET home_chain = $1, updated_at = now()
+             WHERE u.id = (
+               SELECT c.user_id FROM users.credentials c
+               WHERE c.tempo_address = $2 AND c.revoked_at IS NULL
+               LIMIT 1
+             )",
+        )
+        .bind(chain_id)
+        .bind(tempo_address.as_str())
+        .execute(&mut *tx)
+        .await
+        .map_err(sqlx_to_domain)?;
+
+        if result.rows_affected() == 0 {
+            return Err(DomainError::UserNotFound);
+        }
+
+        sqlx::query(
+            "INSERT INTO users.home_chain_audit
+                (tempo_address, previous_chain, new_chain, operator, reason)
+             VALUES ($1, $2, $3, $4, 'chain_decommission')",
+        )
+        .bind(tempo_address.as_str())
+        .bind(previous_chain)
+        .bind(chain_id)
+        .bind(operator)
+        .execute(&mut *tx)
+        .await
+        .map_err(sqlx_to_domain)?;
+
+        tx.commit().await.map_err(sqlx_to_domain)?;
+        Ok(())
+    }
 }
 
 #[cfg(test)]

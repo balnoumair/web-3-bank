@@ -4,6 +4,7 @@ use std::env;
 pub struct Config {
     pub database_url: String,
     pub grpc_addr: String,
+    pub decommission_orchestrator_token: Option<String>,
 }
 
 impl Config {
@@ -11,6 +12,7 @@ impl Config {
         Ok(Self {
             database_url: env::var("DATABASE_URL")?,
             grpc_addr: env::var("GRPC_ADDR").unwrap_or_else(|_| "0.0.0.0:50051".to_string()),
+            decommission_orchestrator_token: env::var("DECOMMISSION_ORCHESTRATOR_TOKEN").ok(),
         })
     }
 }
@@ -42,6 +44,7 @@ mod tests {
         env::remove_var("GRPC_ADDR");
         let cfg = Config::from_env().unwrap();
         assert_eq!(cfg.grpc_addr, "0.0.0.0:50051");
+        assert!(cfg.decommission_orchestrator_token.is_none());
         match original {
             Some(val) => env::set_var("DATABASE_URL", val),
             None => env::remove_var("DATABASE_URL"),

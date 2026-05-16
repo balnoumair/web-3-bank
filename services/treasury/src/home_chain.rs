@@ -96,6 +96,8 @@ impl HomeChainIndexer {
                         let req = Request::new(SetUserHomeChainRequest {
                             tempo_address: tempo,
                             chain_id: chain_id.0,
+                            decommission_override: false,
+                            operator: String::new(),
                         });
                         if let Err(e) = client.set_user_home_chain(req).await {
                             warn!(

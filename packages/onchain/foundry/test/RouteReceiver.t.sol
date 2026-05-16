@@ -24,6 +24,8 @@ contract RouteReceiverTest is Test {
 
     event OwnershipTransferStarted(address indexed previousOwner, address indexed newOwner);
     event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
+    event ChainDecommissioningMarked(uint256 indexed chainId);
+    event ChainDecommissionFinalized(uint256 indexed chainId);
 
     function setUp() public {
         receiver = new RouteReceiver();
@@ -36,23 +38,9 @@ contract RouteReceiverTest is Test {
         vm.prank(publisher);
 
         vm.expectEmit(true, false, false, true);
-        emit RoutePublished(
-            "run-001",
-            "run-001",
-            "customer-1",
-            "base-sepolia",
-            82,
-            1740000000,
-            block.timestamp
-        );
+        emit RoutePublished("run-001", "run-001", "customer-1", "base-sepolia", 82, 1740000000, block.timestamp);
 
-        receiver.publishRoute(
-            "run-001",
-            "customer-1",
-            "base-sepolia",
-            82,
-            1740000000
-        );
+        receiver.publishRoute("run-001", "customer-1", "base-sepolia", 82, 1740000000);
     }
 
     // ── Unauthorized address reverts ───────────────────────────────────
@@ -61,13 +49,7 @@ contract RouteReceiverTest is Test {
         vm.prank(unauthorized);
 
         vm.expectRevert("RouteReceiver: not authorized publisher");
-        receiver.publishRoute(
-            "run-002",
-            "customer-1",
-            "base-sepolia",
-            75,
-            1740000001
-        );
+        receiver.publishRoute("run-002", "customer-1", "base-sepolia", 75, 1740000001);
     }
 
     // ── Duplicate runId is rejected (separate namespaces) ─────────────
@@ -75,22 +57,10 @@ contract RouteReceiverTest is Test {
     function test_duplicateRunIdReverts() public {
         vm.startPrank(publisher);
 
-        receiver.publishRoute(
-            "run-003",
-            "customer-1",
-            "base-sepolia",
-            82,
-            1740000000
-        );
+        receiver.publishRoute("run-003", "customer-1", "base-sepolia", 82, 1740000000);
 
         vm.expectRevert("RouteReceiver: runId already published");
-        receiver.publishRoute(
-            "run-003",
-            "customer-1",
-            "base-sepolia",
-            82,
-            1740000000
-        );
+        receiver.publishRoute("run-003", "customer-1", "base-sepolia", 82, 1740000000);
 
         vm.stopPrank();
     }
@@ -99,22 +69,11 @@ contract RouteReceiverTest is Test {
         // Same runId can appear in route namespace and activation namespace independently
         vm.startPrank(publisher);
 
-        receiver.publishRoute(
-            "run-shared",
-            "customer-1",
-            "base-sepolia",
-            82,
-            1740000000
-        );
+        receiver.publishRoute("run-shared", "customer-1", "base-sepolia", 82, 1740000000);
 
         // Same runId in activation namespace must succeed — separate mapping
         receiver.publishActivationState(
-            "run-shared",
-            "customer-1",
-            5000,
-            "base-sepolia",
-            "arbitrum-sepolia",
-            1740000000
+            "run-shared", "customer-1", 5000, "base-sepolia", "arbitrum-sepolia", 1740000000
         );
 
         vm.stopPrank();
@@ -126,24 +85,10 @@ contract RouteReceiverTest is Test {
     function test_duplicateActivationRunIdReverts() public {
         vm.startPrank(publisher);
 
-        receiver.publishActivationState(
-            "act-001",
-            "customer-1",
-            5000,
-            "base-sepolia",
-            "arbitrum-sepolia",
-            1740000000
-        );
+        receiver.publishActivationState("act-001", "customer-1", 5000, "base-sepolia", "arbitrum-sepolia", 1740000000);
 
         vm.expectRevert("RouteReceiver: runId already published");
-        receiver.publishActivationState(
-            "act-001",
-            "customer-1",
-            5000,
-            "base-sepolia",
-            "arbitrum-sepolia",
-            1740000000
-        );
+        receiver.publishActivationState("act-001", "customer-1", 5000, "base-sepolia", "arbitrum-sepolia", 1740000000);
 
         vm.stopPrank();
     }
@@ -152,20 +97,10 @@ contract RouteReceiverTest is Test {
 
     function test_getLatestRouteReturnsCorrectData() public {
         vm.prank(publisher);
-        receiver.publishRoute(
-            "run-004",
-            "customer-1",
-            "base-sepolia",
-            90,
-            1740000010
-        );
+        receiver.publishRoute("run-004", "customer-1", "base-sepolia", 90, 1740000010);
 
-        (
-            string memory runId,
-            string memory recommendedChain,
-            uint256 score,
-            uint256 timestamp
-        ) = receiver.getLatestRoute("customer-1");
+        (string memory runId, string memory recommendedChain, uint256 score, uint256 timestamp) =
+            receiver.getLatestRoute("customer-1");
 
         assertEq(runId, "run-004");
         assertEq(recommendedChain, "base-sepolia");
@@ -178,27 +113,13 @@ contract RouteReceiverTest is Test {
     function test_multipleCustomersStoreIndependently() public {
         vm.startPrank(publisher);
 
-        receiver.publishRoute(
-            "run-005",
-            "customer-1",
-            "base-sepolia",
-            80,
-            1740000020
-        );
-        receiver.publishRoute(
-            "run-006",
-            "customer-2",
-            "arbitrum-sepolia",
-            95,
-            1740000021
-        );
+        receiver.publishRoute("run-005", "customer-1", "base-sepolia", 80, 1740000020);
+        receiver.publishRoute("run-006", "customer-2", "arbitrum-sepolia", 95, 1740000021);
 
         vm.stopPrank();
 
-        (string memory runId1, string memory chain1, uint256 score1, ) =
-            receiver.getLatestRoute("customer-1");
-        (string memory runId2, string memory chain2, uint256 score2, ) =
-            receiver.getLatestRoute("customer-2");
+        (string memory runId1, string memory chain1, uint256 score1,) = receiver.getLatestRoute("customer-1");
+        (string memory runId2, string memory chain2, uint256 score2,) = receiver.getLatestRoute("customer-2");
 
         assertEq(runId1, "run-005");
         assertEq(chain1, "base-sepolia");
@@ -215,15 +136,9 @@ contract RouteReceiverTest is Test {
         receiver.addPublisher(publisher2);
 
         vm.prank(publisher2);
-        receiver.publishRoute(
-            "run-007",
-            "customer-1",
-            "base-sepolia",
-            70,
-            1740000030
-        );
+        receiver.publishRoute("run-007", "customer-1", "base-sepolia", 70, 1740000030);
 
-        (string memory runId, , , ) = receiver.getLatestRoute("customer-1");
+        (string memory runId,,,) = receiver.getLatestRoute("customer-1");
         assertEq(runId, "run-007");
     }
 
@@ -232,13 +147,7 @@ contract RouteReceiverTest is Test {
 
         vm.prank(publisher);
         vm.expectRevert("RouteReceiver: not authorized publisher");
-        receiver.publishRoute(
-            "run-008",
-            "customer-1",
-            "base-sepolia",
-            60,
-            1740000040
-        );
+        receiver.publishRoute("run-008", "customer-1", "base-sepolia", 60, 1740000040);
     }
 
     function test_nonOwnerCannotAddPublisher() public {
@@ -261,13 +170,7 @@ contract RouteReceiverTest is Test {
 
     function test_isRouteRunPublishedReturnsTrueAfterPublish() public {
         vm.prank(publisher);
-        receiver.publishRoute(
-            "run-009",
-            "customer-1",
-            "base-sepolia",
-            85,
-            1740000050
-        );
+        receiver.publishRoute("run-009", "customer-1", "base-sepolia", 85, 1740000050);
 
         assertTrue(receiver.isRouteRunPublished("run-009"));
         assertFalse(receiver.isActivationRunPublished("run-009"));
@@ -275,14 +178,7 @@ contract RouteReceiverTest is Test {
 
     function test_isActivationRunPublishedReturnsTrueAfterPublish() public {
         vm.prank(publisher);
-        receiver.publishActivationState(
-            "act-002",
-            "customer-1",
-            5000,
-            "base-sepolia",
-            "arbitrum-sepolia",
-            1740000050
-        );
+        receiver.publishActivationState("act-002", "customer-1", 5000, "base-sepolia", "arbitrum-sepolia", 1740000050);
 
         assertTrue(receiver.isActivationRunPublished("act-002"));
         assertFalse(receiver.isRouteRunPublished("act-002"));
@@ -413,5 +309,96 @@ contract RouteReceiverTest is Test {
         vm.prank(newOwner);
         receiver.addPublisher(publisher2);
         assertTrue(receiver.publishers(publisher2));
+    }
+
+    // ── Chain decommissioning ─────────────────────────────────────────
+
+    function test_ownerCanMarkAndFinalizeDecommission() public {
+        vm.expectEmit(true, false, false, false);
+        emit ChainDecommissioningMarked(84532);
+        receiver.markDecommissioning(84532);
+
+        (bool draining, bool decommissioned) = receiver.getChainDecommissionStatus(84532);
+        assertTrue(draining);
+        assertFalse(decommissioned);
+
+        vm.expectEmit(true, false, false, false);
+        emit ChainDecommissionFinalized(84532);
+        receiver.finalizeDecommission(84532);
+
+        (draining, decommissioned) = receiver.getChainDecommissionStatus(84532);
+        assertTrue(draining);
+        assertTrue(decommissioned);
+    }
+
+    function test_nonOwnerCannotMarkOrFinalizeDecommission() public {
+        vm.prank(unauthorized);
+        vm.expectRevert("RouteReceiver: not owner");
+        receiver.markDecommissioning(84532);
+
+        vm.prank(unauthorized);
+        vm.expectRevert("RouteReceiver: not owner");
+        receiver.finalizeDecommission(84532);
+    }
+
+    function test_finalizeRequiresDrainingState() public {
+        vm.expectRevert(abi.encodeWithSelector(RouteReceiver.ChainNotDraining.selector, uint256(84532)));
+        receiver.finalizeDecommission(84532);
+    }
+
+    function test_decommissionedCannotBeUnsetOrFinalizedAgain() public {
+        receiver.markDecommissioning(84532);
+        receiver.finalizeDecommission(84532);
+
+        vm.expectRevert(abi.encodeWithSelector(RouteReceiver.ChainAlreadyDecommissioned.selector, uint256(84532)));
+        receiver.markDecommissioning(84532);
+
+        vm.expectRevert(abi.encodeWithSelector(RouteReceiver.ChainAlreadyDecommissioned.selector, uint256(84532)));
+        receiver.finalizeDecommission(84532);
+    }
+
+    function test_creActivationCannotAffectDecommissionedChain() public {
+        receiver.markDecommissioning(84532);
+        receiver.finalizeDecommission(84532);
+
+        vm.prank(publisher);
+        vm.expectRevert(
+            abi.encodeWithSelector(RouteReceiver.ActivationTouchesDecommissionedChain.selector, uint256(84532))
+        );
+        receiver.publishActivationState("act-decom-active", "customer-1", 5000, "84532,421614", "", 1740000000);
+
+        vm.prank(publisher);
+        vm.expectRevert(
+            abi.encodeWithSelector(RouteReceiver.ActivationTouchesDecommissionedChain.selector, uint256(84532))
+        );
+        receiver.publishActivationState("act-decom-inactive", "customer-1", 5000, "421614", "84532", 1740000001);
+
+        (bool draining, bool decommissioned) = receiver.getChainDecommissionStatus(84532);
+        assertTrue(draining);
+        assertTrue(decommissioned);
+    }
+
+    function test_getLatestRouteWithChainStateExposesThirdState() public {
+        receiver.markDecommissioning(84532);
+        receiver.finalizeDecommission(84532);
+
+        vm.prank(publisher);
+        receiver.publishRoute("run-with-state", "customer-1", "base-sepolia", 82, 1740000000);
+
+        (
+            string memory runId,
+            string memory recommendedChain,
+            uint256 score,
+            uint256 timestamp,
+            bool draining,
+            bool decommissioned
+        ) = receiver.getLatestRouteWithChainState("customer-1", 84532);
+
+        assertEq(runId, "run-with-state");
+        assertEq(recommendedChain, "base-sepolia");
+        assertEq(score, 82);
+        assertEq(timestamp, 1740000000);
+        assertTrue(draining);
+        assertTrue(decommissioned);
     }
 }
