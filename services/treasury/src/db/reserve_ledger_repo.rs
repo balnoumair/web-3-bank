@@ -222,11 +222,10 @@ mod tests {
         let repo = PgReserveLedgerRepository::new(pool.clone());
         repo.seed_opening_balance(ChainId(1), U256::from(1000u64))
             .await;
-        let init =
-            initiation_transfer(OperationId("o1".into()), ChainId(1), U256::from(100u64));
+        let init = initiation_transfer(OperationId("o1".into()), ChainId(1), U256::from(100u64));
         record(&pool, &init).await;
-        record(&pool, &init).await; // duplicate
-        // in_transit reflects a single 100, not 200.
+        // Record the same (op_id, leg) twice; in_transit reflects a single 100, not 200.
+        record(&pool, &init).await;
         assert_eq!(repo.in_transit_balance().await, U256::from(100u64));
     }
 
