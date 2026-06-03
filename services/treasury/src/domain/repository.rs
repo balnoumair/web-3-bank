@@ -186,6 +186,36 @@ pub trait ReserveRepository: Send + Sync {
     async fn list_stuck(&self, stuck_after_secs: i64) -> Vec<ReserveOpRow>;
 }
 
+// ── Reserve ledger repository (internal double-entry mirror) ────────────────
+
+/// Read + bootstrap surface for the internal reserve-accounting ledger.
+///
+/// The lifecycle transfers (initiation / completion / reversal) are written
+/// atomically with the `reserve_ops` status change inside the reserve adapter's
+/// transaction — see `db::reserve_ledger_repo::record_transfer_tx`. This port
+/// therefore exposes only what the bootstrap and reconciliation loops need:
+/// reading derived balances and seeding opening balances. The ledger is a
+/// secondary mirror, never the source of truth.
+#[async_trait]
+pub trait ReserveLedgerRepository: Send + Sync {
+    /// Current ledger balance of a chain's reserve account (credits − debits),
+    /// saturating at zero. Compared against on-chain `reserveDepth()` during
+    /// reconciliation.
+    async fn account_balance(&self, chain: ChainId) -> U256;
+
+    /// Current balance of the shared in-transit account: total value mid-bridge
+    /// right now. This is the question the chain cannot answer on its own.
+    async fn in_transit_balance(&self) -> U256;
+
+    /// Seed a chain's reserve account from genesis with its current on-chain
+    /// depth, so the ledger starts reconciled. Idempotent per chain (keyed
+    /// `opening:<chain>`): safe to call on every startup.
+    async fn seed_opening_balance(&self, chain: ChainId, depth: U256);
+
+    /// Whether an opening balance has already been seeded for this chain.
+    async fn has_opening_balance(&self, chain: ChainId) -> bool;
+}
+
 // ── Decommission repository ─────────────────────────────────────────────────
 
 /// Audit row status for `treasury.decommission_ops`.

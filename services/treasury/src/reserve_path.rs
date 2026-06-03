@@ -47,7 +47,10 @@ use crate::domain::abi::{
 };
 use crate::domain::newtypes::{ChainId, OperationId, TxHash};
 use crate::domain::rebalance::{compute_rebalance_ops, evaluate_rebalance_op, RebalanceOpDecision};
-use crate::domain::repository::{ReserveOpRow, ReserveRepository};
+use crate::domain::repository::{
+    ReserveLedgerRepository, ReserveOpRow, ReserveRepository, WatcherRepository,
+};
+use crate::domain::status::AlertType;
 use crate::error::TxError;
 use crate::eth;
 
@@ -68,6 +71,10 @@ const ATTESTATION_HTTP_TIMEOUT: Duration = Duration::from_secs(10);
 
 pub struct ReservePath {
     reserve_repo: Arc<dyn ReserveRepository>,
+    /// Internal double-entry reserve ledger (a mirror, never the source of truth).
+    ledger_repo: Arc<dyn ReserveLedgerRepository>,
+    /// Reused for raising reconciliation-divergence alerts.
+    watcher_repo: Arc<dyn WatcherRepository>,
     config: Arc<Config>,
     http: reqwest::Client,
     active_chains: Arc<RwLock<HashSet<ChainId>>>,
@@ -88,11 +95,16 @@ pub struct ReservePath {
 
     max_wei_per_op: Option<U256>,
     bridge_fee_wei: U256,
+
+    /// Allowed |ledger − on-chain| gap before a reconciliation alert fires.
+    recon_tolerance_wei: U256,
 }
 
 impl ReservePath {
     pub fn new(
         reserve_repo: Arc<dyn ReserveRepository>,
+        ledger_repo: Arc<dyn ReserveLedgerRepository>,
+        watcher_repo: Arc<dyn WatcherRepository>,
         config: Arc<Config>,
         http: reqwest::Client,
     ) -> Arc<Self> {
@@ -140,8 +152,19 @@ impl ReservePath {
             .parse::<U256>()
             .unwrap_or(U256::ZERO);
 
+        let recon_tolerance_wei = if config.reserve_recon_tolerance_wei.is_empty() {
+            U256::ZERO
+        } else {
+            config
+                .reserve_recon_tolerance_wei
+                .parse::<U256>()
+                .unwrap_or(U256::ZERO)
+        };
+
         Arc::new(Self {
             reserve_repo,
+            ledger_repo,
+            watcher_repo,
             config,
             http,
             active_chains: Arc::new(RwLock::new(initial)),
@@ -158,6 +181,7 @@ impl ReservePath {
             decommissioned_chains: Arc::new(RwLock::new(HashSet::new())),
             max_wei_per_op,
             bridge_fee_wei,
+            recon_tolerance_wei,
         })
     }
 
@@ -176,6 +200,128 @@ impl ReservePath {
 
         let r = Arc::clone(&self);
         tokio::spawn(async move { r.watcher_loop(poll).await });
+
+        // Reserve-accounting ledger: seed opening balances once, then reconcile
+        // against on-chain reserveDepth() on its own (slower) cadence.
+        let recon_poll = Duration::from_secs(self.config.reserve_recon_poll_secs);
+        let r = Arc::clone(&self);
+        tokio::spawn(async move {
+            r.bootstrap_ledger().await;
+            r.reconcile_loop(recon_poll).await;
+        });
+    }
+
+    // ── Reserve-accounting ledger: bootstrap + reconciliation ──────────────────
+
+    /// Active chains that have a Bank contract address configured, with their
+    /// RPC URL and address. Shared by the planner-style depth reads below.
+    async fn active_chain_targets(&self) -> Vec<(ChainId, String, String)> {
+        let active = self.active_chains.read().await.clone();
+        let decommissioned = self.decommissioned_chains.read().await.clone();
+        self.config
+            .rpc_urls
+            .iter()
+            .filter_map(|(&chain_id, rpc_url)| {
+                if !active.contains(&ChainId(chain_id))
+                    || decommissioned.contains(&ChainId(chain_id))
+                {
+                    return None;
+                }
+                self.config
+                    .contract_addresses
+                    .get(&chain_id)
+                    .map(|addr| (ChainId(chain_id), rpc_url.clone(), addr.clone()))
+            })
+            .collect()
+    }
+
+    /// Seed each chain's reserve account from its current on-chain depth so the
+    /// ledger starts reconciled. Idempotent per chain — a no-op on restart.
+    async fn bootstrap_ledger(&self) {
+        for (chain, rpc_url, bank_addr) in self.active_chain_targets().await {
+            if self.ledger_repo.has_opening_balance(chain).await {
+                continue;
+            }
+            match eth::fetch_pool_depth(
+                &self.http,
+                &rpc_url,
+                &bank_addr,
+                &self.reserve_depth_selector,
+            )
+            .await
+            {
+                Some(depth) => {
+                    self.ledger_repo.seed_opening_balance(chain, depth).await;
+                    info!(chain = chain.0, depth = %depth, "reserve_ledger: seeded opening balance");
+                }
+                None => warn!(
+                    chain = chain.0,
+                    "reserve_ledger: depth fetch failed — opening balance deferred to next startup"
+                ),
+            }
+        }
+    }
+
+    async fn reconcile_loop(self: Arc<Self>, poll: Duration) {
+        info!(
+            interval_secs = poll.as_secs(),
+            tolerance = %self.recon_tolerance_wei,
+            "reserve_path: ledger reconciliation started"
+        );
+        loop {
+            self.run_reconcile_cycle().await;
+            tokio::time::sleep(poll).await;
+        }
+    }
+
+    /// Compare each chain's ledger reserve balance to its on-chain `reserveDepth()`.
+    /// On a gap beyond tolerance, raise a watcher alert. Never auto-corrects the
+    /// ledger — divergence is for a human to investigate (the chain is the truth).
+    async fn run_reconcile_cycle(&self) {
+        for (chain, rpc_url, bank_addr) in self.active_chain_targets().await {
+            let Some(onchain) = eth::fetch_pool_depth(
+                &self.http,
+                &rpc_url,
+                &bank_addr,
+                &self.reserve_depth_selector,
+            )
+            .await
+            else {
+                warn!(
+                    chain = chain.0,
+                    "reserve_recon: depth fetch failed — skipping chain this cycle"
+                );
+                continue;
+            };
+
+            let ledger = self.ledger_repo.account_balance(chain).await;
+
+            if let Some(diff) = recon_gap_exceeds(ledger, onchain, self.recon_tolerance_wei) {
+                warn!(
+                    chain = chain.0,
+                    ledger = %ledger,
+                    onchain = %onchain,
+                    diff = %diff,
+                    "reserve_recon: ledger diverges from on-chain reserveDepth beyond tolerance"
+                );
+                // Bucket the alert key by the hour so a persistent divergence
+                // raises at most one alert per chain per hour (insert is
+                // idempotent on the key), rather than every cycle.
+                let hour = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs()
+                    / 3600;
+                let key = format!("recon-mismatch:{}:{}", chain.0, hour);
+                let detail = format!(
+                    r#"{{"chain":{},"ledger":"{}","onchain":"{}","diff":"{}"}}"#,
+                    chain.0, ledger, onchain, diff
+                );
+                self.watcher_repo
+                    .insert_alert(&key, AlertType::Mismatch, &detail)
+                    .await;
+            }
+        }
     }
 
     // ── Route receiver poll (active-set tracking) ──────────────────────────
@@ -853,6 +999,19 @@ impl ReservePath {
     }
 }
 
+/// Pure reconciliation decision: returns the absolute gap between the ledger and
+/// on-chain reserve depth when it exceeds `tolerance` (→ raise an alert), or
+/// `None` when within tolerance (→ silent pass). Extracted so the decision is
+/// testable without RPC.
+fn recon_gap_exceeds(ledger: U256, onchain: U256, tolerance: U256) -> Option<U256> {
+    let diff = if onchain > ledger {
+        onchain - ledger
+    } else {
+        ledger - onchain
+    };
+    (diff > tolerance).then_some(diff)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -863,5 +1022,41 @@ mod tests {
         s.copy_from_slice(&keccak256(b"reserveDepth()")[..4]);
         // Sanity: selector exists and isn't trivially zero.
         assert!(s.iter().any(|&b| b != 0));
+    }
+
+    #[test]
+    fn recon_within_tolerance_is_silent() {
+        // Ledger and chain differ by 5, tolerance 10 → no alert.
+        assert_eq!(
+            recon_gap_exceeds(U256::from(1000u64), U256::from(1005u64), U256::from(10u64)),
+            None
+        );
+        // Exact match → no alert.
+        assert_eq!(
+            recon_gap_exceeds(U256::from(1000u64), U256::from(1000u64), U256::ZERO),
+            None
+        );
+    }
+
+    #[test]
+    fn recon_beyond_tolerance_reports_gap() {
+        // Gap of 50 over tolerance 10 → alert with the gap, regardless of side.
+        assert_eq!(
+            recon_gap_exceeds(U256::from(1000u64), U256::from(1050u64), U256::from(10u64)),
+            Some(U256::from(50u64))
+        );
+        assert_eq!(
+            recon_gap_exceeds(U256::from(1050u64), U256::from(1000u64), U256::from(10u64)),
+            Some(U256::from(50u64))
+        );
+    }
+
+    #[test]
+    fn recon_gap_exactly_at_tolerance_is_silent() {
+        // diff == tolerance is within bounds (strictly-greater triggers).
+        assert_eq!(
+            recon_gap_exceeds(U256::from(1000u64), U256::from(1010u64), U256::from(10u64)),
+            None
+        );
     }
 }

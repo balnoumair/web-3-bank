@@ -92,18 +92,27 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let relay_repo: Arc<dyn crate::domain::repository::RelayRepository> =
         Arc::new(db::PgRelayRepository::new(pool.clone()));
     let rebalance_repo = Arc::new(db::PgRebalanceRepository::new(pool.clone()));
-    let watcher_repo = Arc::new(db::PgWatcherRepository::new(pool.clone()));
+    let watcher_repo: Arc<dyn crate::domain::repository::WatcherRepository> =
+        Arc::new(db::PgWatcherRepository::new(pool.clone()));
     let snapshot_repo = Arc::new(db::PgPoolSnapshotRepository::new(pool.clone()));
     let reserve_repo: Arc<dyn crate::domain::repository::ReserveRepository> =
         Arc::new(db::PgReserveRepository::new(pool.clone()));
+    let reserve_ledger_repo: Arc<dyn crate::domain::repository::ReserveLedgerRepository> =
+        Arc::new(db::PgReserveLedgerRepository::new(pool.clone()));
     let _decommission_repo: Arc<dyn crate::domain::repository::DecommissionRepository> =
         Arc::new(db::PgDecommissionRepository::new(pool.clone()));
 
     let hot_path = HotPath::new(Arc::clone(&relay_repo), Arc::clone(&cfg), http.clone());
     let pool_manager = PoolManager::new(snapshot_repo, Arc::clone(&cfg), http.clone());
-    let watcher = Watcher::new(watcher_repo, Arc::clone(&cfg), http.clone());
+    let watcher = Watcher::new(Arc::clone(&watcher_repo), Arc::clone(&cfg), http.clone());
     let cold_path = ColdPath::new(rebalance_repo, Arc::clone(&cfg), http.clone());
-    let reserve_path = ReservePath::new(reserve_repo, Arc::clone(&cfg), http.clone());
+    let reserve_path = ReservePath::new(
+        reserve_repo,
+        Arc::clone(&reserve_ledger_repo),
+        Arc::clone(&watcher_repo),
+        Arc::clone(&cfg),
+        http.clone(),
+    );
 
     // ── 4. Spawn background tasks ─────────────────────────────────────────────
     Arc::clone(&hot_path).spawn_background();

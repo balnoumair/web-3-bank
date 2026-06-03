@@ -5,9 +5,11 @@
 
 use alloy_primitives::U256;
 use async_trait::async_trait;
-use sqlx::PgPool;
+use sqlx::{PgPool, Row};
 use tracing::error;
 
+use crate::db::reserve_ledger_repo::record_transfer_tx;
+use crate::domain::ledger::{completion_transfer, initiation_transfer, reversal_transfer};
 use crate::domain::newtypes::{ChainId, OperationId, TxHash};
 use crate::domain::repository::{ReserveOpRow, ReserveRepository};
 
@@ -19,6 +21,136 @@ impl PgReserveRepository {
     pub fn new(pool: PgPool) -> Self {
         Self { pool }
     }
+
+    /// Atomic `submitted` transition + ledger initiation transfer.
+    /// Moves the op's amount from `reserve:<src>` into `in_transit`.
+    async fn update_submitted_inner(
+        &self,
+        op_id: &OperationId,
+        source_tx_hash: &TxHash,
+        bridge_message_id: Option<&str>,
+    ) -> Result<(), sqlx::Error> {
+        let mut tx = self.pool.begin().await?;
+
+        sqlx::query!(
+            "UPDATE treasury.reserve_ops \
+             SET status = 'submitted', source_tx_hash = $1, bridge_message_id = $2, updated_at = NOW() \
+             WHERE op_id = $3",
+            source_tx_hash.as_str(),
+            bridge_message_id,
+            op_id.as_str(),
+        )
+        .execute(&mut *tx)
+        .await?;
+
+        if let Some((source_chain, _dest_chain, amount)) =
+            fetch_op_chains_amount(&mut tx, op_id).await?
+        {
+            let transfer = initiation_transfer(op_id.clone(), source_chain, amount);
+            record_transfer_tx(&mut tx, &transfer).await?;
+        }
+
+        tx.commit().await
+    }
+
+    /// Atomic `completed` transition + ledger completion transfer.
+    /// Moves the op's amount from `in_transit` into `reserve:<dst>`. Guarded so a
+    /// completion is only recorded when its initiation leg exists, keeping the
+    /// books balanced.
+    async fn update_completed_inner(&self, op_id: &OperationId) -> Result<(), sqlx::Error> {
+        let mut tx = self.pool.begin().await?;
+
+        sqlx::query!(
+            "UPDATE treasury.reserve_ops \
+             SET status = 'completed', completed_at = NOW(), updated_at = NOW() \
+             WHERE op_id = $1",
+            op_id.as_str(),
+        )
+        .execute(&mut *tx)
+        .await?;
+
+        if leg_exists(&mut tx, op_id, "initiation").await? {
+            if let Some((_source_chain, dest_chain, amount)) =
+                fetch_op_chains_amount(&mut tx, op_id).await?
+            {
+                let transfer = completion_transfer(op_id.clone(), dest_chain, amount);
+                record_transfer_tx(&mut tx, &transfer).await?;
+            }
+        }
+
+        tx.commit().await
+    }
+
+    /// Atomic `failed` transition + compensating ledger reversal.
+    /// If the op was already in-transit (initiation recorded) and never
+    /// completed, return its value from `in_transit` back to `reserve:<src>` so
+    /// nothing leaks. Ops that failed before submission have no initiation leg
+    /// and need no reversal.
+    async fn update_failed_inner(&self, op_id: &OperationId) -> Result<(), sqlx::Error> {
+        let mut tx = self.pool.begin().await?;
+
+        sqlx::query!(
+            "UPDATE treasury.reserve_ops \
+             SET status = 'failed', updated_at = NOW() \
+             WHERE op_id = $1",
+            op_id.as_str(),
+        )
+        .execute(&mut *tx)
+        .await?;
+
+        let needs_reversal = leg_exists(&mut tx, op_id, "initiation").await?
+            && !leg_exists(&mut tx, op_id, "completion").await?;
+        if needs_reversal {
+            if let Some((source_chain, _dest_chain, amount)) =
+                fetch_op_chains_amount(&mut tx, op_id).await?
+            {
+                let transfer = reversal_transfer(op_id.clone(), source_chain, amount);
+                record_transfer_tx(&mut tx, &transfer).await?;
+            }
+        }
+
+        tx.commit().await
+    }
+}
+
+/// Read `(source_chain, dest_chain, amount)` for an op inside a transaction, so
+/// the ledger transfer is derived from the same `reserve_ops` row it accompanies.
+async fn fetch_op_chains_amount(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    op_id: &OperationId,
+) -> Result<Option<(ChainId, ChainId, U256)>, sqlx::Error> {
+    let row = sqlx::query(
+        "SELECT source_chain_id, dest_chain_id, amount_wei::TEXT AS amount_wei \
+         FROM treasury.reserve_ops WHERE op_id = $1",
+    )
+    .bind(op_id.as_str())
+    .fetch_optional(&mut **tx)
+    .await?;
+
+    let Some(row) = row else { return Ok(None) };
+    let src: i64 = row.try_get("source_chain_id")?;
+    let dst: i64 = row.try_get("dest_chain_id")?;
+    let amount_str: String = row.try_get("amount_wei")?;
+    let Ok(amount) = amount_str.parse::<U256>() else {
+        return Ok(None);
+    };
+    Ok(Some((ChainId(src as u64), ChainId(dst as u64), amount)))
+}
+
+/// Whether a given ledger leg has been recorded for an op, inside a transaction.
+async fn leg_exists(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    op_id: &OperationId,
+    leg: &str,
+) -> Result<bool, sqlx::Error> {
+    sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM treasury.reserve_ledger_transfers \
+         WHERE op_id = $1 AND leg = $2)",
+    )
+    .bind(op_id.as_str())
+    .bind(leg)
+    .fetch_one(&mut **tx)
+    .await
 }
 
 #[async_trait]
@@ -76,16 +208,9 @@ impl ReserveRepository for PgReserveRepository {
         source_tx_hash: &TxHash,
         bridge_message_id: Option<&str>,
     ) {
-        if let Err(e) = sqlx::query!(
-            "UPDATE treasury.reserve_ops \
-             SET status = 'submitted', source_tx_hash = $1, bridge_message_id = $2, updated_at = NOW() \
-             WHERE op_id = $3",
-            source_tx_hash.as_str(),
-            bridge_message_id,
-            op_id.as_str(),
-        )
-        .execute(&self.pool)
-        .await
+        if let Err(e) = self
+            .update_submitted_inner(op_id, source_tx_hash, bridge_message_id)
+            .await
         {
             error!(op_id = op_id.as_str(), err = %e, "reserve_repo: update_submitted failed");
         }
@@ -128,29 +253,13 @@ impl ReserveRepository for PgReserveRepository {
     }
 
     async fn update_completed(&self, op_id: &OperationId) {
-        if let Err(e) = sqlx::query!(
-            "UPDATE treasury.reserve_ops \
-             SET status = 'completed', completed_at = NOW(), updated_at = NOW() \
-             WHERE op_id = $1",
-            op_id.as_str(),
-        )
-        .execute(&self.pool)
-        .await
-        {
+        if let Err(e) = self.update_completed_inner(op_id).await {
             error!(op_id = op_id.as_str(), err = %e, "reserve_repo: update_completed failed");
         }
     }
 
     async fn update_failed(&self, op_id: &OperationId) {
-        if let Err(e) = sqlx::query!(
-            "UPDATE treasury.reserve_ops \
-             SET status = 'failed', updated_at = NOW() \
-             WHERE op_id = $1",
-            op_id.as_str(),
-        )
-        .execute(&self.pool)
-        .await
-        {
+        if let Err(e) = self.update_failed_inner(op_id).await {
             error!(op_id = op_id.as_str(), err = %e, "reserve_repo: update_failed failed");
         }
     }

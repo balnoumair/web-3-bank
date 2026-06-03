@@ -124,6 +124,21 @@ pub struct Config {
     /// 0 for most chains.  Default: "0".
     #[serde(default)]
     pub reserve_bridge_fee_wei: String,
+
+    // ── Reserve-accounting ledger reconciliation ──────────────────────────────
+    /// How often (seconds) to reconcile the internal reserve ledger against
+    /// on-chain `reserveDepth()`.  Default: 300 (5 minutes) — reserves move
+    /// rarely, so this need not be frequent.
+    #[serde(default = "default_reserve_recon_poll_secs")]
+    pub reserve_recon_poll_secs: u64,
+
+    /// Allowed absolute difference (USDC 6-decimal wei, decimal string) between
+    /// a chain's ledger reserve balance and its on-chain `reserveDepth()` before
+    /// a reconciliation alert is raised.  Absorbs lifecycle timing skew (the
+    /// brief window between a bridge tx mining and the ledger recording it).
+    /// Empty = 0 (exact match required).  Default: "0".
+    #[serde(default)]
+    pub reserve_recon_tolerance_wei: String,
 }
 
 fn default_grpc_port() -> u16 {
@@ -156,6 +171,10 @@ fn default_reserve_path_stuck_timeout_secs() -> u64 {
 
 fn default_circle_attestation_url() -> String {
     "https://iris-api.circle.com".to_string()
+}
+
+fn default_reserve_recon_poll_secs() -> u64 {
+    300 // 5 minutes
 }
 
 impl Config {
