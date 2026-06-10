@@ -46,6 +46,35 @@ The User Service SHALL NOT interact with any blockchain. It is purely an off-cha
 - **THEN** the User Service SHALL NOT fetch the data from a blockchain
 - **AND** the caller SHALL use the Treasury Service for that data
 
+### Requirement: Username handle for human-friendly addressing
+
+A user MAY set a username handle on their profile. Usernames SHALL be 3–20 characters, SHALL start with a letter, and SHALL contain only alphanumeric characters or underscores. Uniqueness SHALL be case-insensitive; the original casing SHALL be preserved for display. Usernames are optional — a profile without one is valid. Only the authenticated owner of a profile SHALL be able to set or change its username (the User Service SHALL receive the user id from the BFF session, never from the client).
+
+#### Scenario: User sets a valid username
+
+- **WHEN** an authenticated user sets the username `Bob_42`
+- **THEN** the User Service SHALL store it on the user's profile
+- **AND** a later attempt by any user to claim `bob_42` SHALL be rejected as taken
+
+#### Scenario: Invalid username is rejected
+
+- **WHEN** a user submits a username that is too short, too long, starts with a non-letter, or contains other characters
+- **THEN** the User Service SHALL reject it without modifying the profile
+
+### Requirement: Username resolves to a profile for sending
+
+The User Service SHALL expose lookup of a user profile by username (case-insensitive). This lookup powers the send flow: the BFF resolves the recipient's username to a Tempo address (and then resolves routing separately, per cross-chain-routing).
+
+#### Scenario: Sender types a recipient's username
+
+- **WHEN** the BFF looks up `alice` and a profile with username `Alice` exists
+- **THEN** the User Service SHALL return that profile including its Tempo address
+
+#### Scenario: Unknown username
+
+- **WHEN** the BFF looks up a username with no matching profile
+- **THEN** the User Service SHALL return a not-found error
+
 ### Requirement: User profile carries a home chain
 
 The User Service SHALL store a `home_chain` value per user representing the chain on which incoming cross-chain transfers are preferentially delivered. `home_chain` SHALL be set automatically on the user's first observed `Deposited` event and SHALL NOT change thereafter except via the chain-decommissioning procedure.
