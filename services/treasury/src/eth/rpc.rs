@@ -218,6 +218,15 @@ pub async fn fetch_max_rebalance_amount(
     fetch_u256_view(http, rpc_url, bank_addr, selector).await
 }
 
+pub async fn fetch_reserve_depth(
+    http: &reqwest::Client,
+    rpc_url: &str,
+    bank_addr: &str,
+    selector: &[u8; 4],
+) -> Option<U256> {
+    fetch_u256_view(http, rpc_url, bank_addr, selector).await
+}
+
 async fn fetch_u256_view(
     http: &reqwest::Client,
     rpc_url: &str,

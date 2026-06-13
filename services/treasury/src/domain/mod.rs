@@ -7,3 +7,4 @@ pub mod rebalance;
 pub mod relay;
 pub mod repository;
 pub mod status;
+pub mod withdrawal_routing;

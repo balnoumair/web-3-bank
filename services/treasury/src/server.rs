@@ -12,13 +12,15 @@ use tracing::info;
 
 use crate::account_activity::AccountActivityService;
 use crate::account_balance::AccountBalanceService;
+use crate::account_withdrawal_routing::AccountWithdrawalRoutingService;
 use crate::hot_path::HotPath;
 use crate::pool_manager::PoolManager;
 use crate::proto::treasury::{
     health_check_response, treasury_service_server::TreasuryService, GetAccountActivityRequest,
     GetAccountActivityResponse, GetBalanceRequest, GetBalanceResponse, GetPoolDepthRequest,
     GetPoolDepthResponse, GetRelayStatusRequest, GetRelayStatusResponse, GetWatcherAlertsRequest,
-    GetWatcherAlertsResponse, HealthCheckRequest, HealthCheckResponse, IsChainActiveRequest,
+    GetWatcherAlertsResponse, GetWithdrawalRoutingRequest, GetWithdrawalRoutingResponse,
+    HealthCheckRequest, HealthCheckResponse, IsChainActiveRequest,
     IsChainActiveResponse, IsChainDecommissionedRequest, IsChainDecommissionedResponse,
 };
 use crate::watcher::Watcher;
@@ -27,6 +29,7 @@ pub struct TreasuryServer {
     pub pool: PgPool,
     pub hot_path: Arc<HotPath>,
     pub account_balance: Arc<AccountBalanceService>,
+    pub account_withdrawal_routing: Arc<AccountWithdrawalRoutingService>,
     pub account_activity: Arc<AccountActivityService>,
     pub pool_manager: Arc<PoolManager>,
     pub watcher: Arc<Watcher>,
@@ -98,6 +101,15 @@ impl TreasuryService for TreasuryServer {
         req: Request<GetAccountActivityRequest>,
     ) -> Result<Response<GetAccountActivityResponse>, Status> {
         self.account_activity.get_account_activity(req).await
+    }
+
+    async fn get_withdrawal_routing(
+        &self,
+        req: Request<GetWithdrawalRoutingRequest>,
+    ) -> Result<Response<GetWithdrawalRoutingResponse>, Status> {
+        self.account_withdrawal_routing
+            .get_withdrawal_routing(req)
+            .await
     }
 
     async fn is_chain_active(

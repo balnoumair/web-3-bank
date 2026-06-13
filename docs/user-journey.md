@@ -257,32 +257,47 @@ A real scenario: Arbitrum's sequencer goes offline for 3 hours.
 **What happens internally:**
 
 ```
-CRE Orchestrator              RouteReceiver.sol          Treasury Service
-    │                              │                          │
-    ├─ Cron detects:               │                          │
-    │  Arbitrum block age > 120s   │                          │
-    │  Reliability score → 0       │                          │
-    │  Overall score → 0.12        │                          │
-    │  Below activation threshold  │                          │
-    │                              │                          │
-    ├─ Publishes updated state ───►│                          │
-    │  Active: [Tempo, Base]       │                          │
-    │  Inactive: [Arbitrum]        │                          │
-    │                              │                          │
-    │                              │    Treasury reads ◄──────┤
-    │                              │                          ├─ Removes Arbitrum from
-    │                              │                          │  hot path routing
-    │                              │                          ├─ Any hot path to Arbitrum
-    │                              │                          │  → REJECTED
-    │                              │                          │
-    │                              │                          │  If a user on Arbitrum
-    │                              │                          │  wants to withdraw:
-    │                              │                          ├─ Treasury fulfills from
-    │                              │                          │  Tempo or Base pool
-    │                              │                          │  instead
+CRE Orchestrator              RouteReceiver.sol          Treasury Service              Bob's Browser
+    │                              │                          │                          │
+    ├─ Cron detects:               │                          │                          │
+    │  Arbitrum block age > 120s   │                          │                          │
+    │  Reliability score → 0       │                          │                          │
+    │  Overall score → 0.12        │                          │                          │
+    │  Below activation threshold  │                          │                          │
+    │                              │                          │                          │
+    ├─ Publishes updated state ───►│                          │                          │
+    │  Active: [Tempo, Base]       │                          │                          │
+    │  Inactive: [Arbitrum]        │                          │                          │
+    │                              │                          │                          │
+    │                              │    Treasury reads ◄──────┤                          │
+    │                              │                          ├─ Removes Arbitrum from   │
+    │                              │                          │  hot path routing        │
+    │                              │                          ├─ Any hot path to Arbitrum│
+    │                              │                          │  → REJECTED              │
+    │                              │                          │                          │
+    │                              │                          │  Bob's SyncUSD on        │
+    │                              │                          │  Arbitrum is safe but    │
+    │                              │                          │  frozen (chain inactive) │
+    │                              │                          │                          │
+    │                              │                          │  Bob withdraws from      │
+    │                              │                          │  Tempo/Base if he holds  │
+    │                              │                          │  balance there ◄─────────┤
+    │                              │                          │                          ├─ BFF withdrawalRouting
+    │                              │                          │                          │  → picks healthy chain
+    │                              │                          │                          ├─ Client builds withdraw()
+    │                              │                          │                          │  on that chain only
+    │                              │                          │                          │
+    │                              │                          │  If Bob's *only* balance │
+    │                              │                          │  is on Arbitrum:         │
+    │                              │                          │  routing reports         │
+    │                              │                          │  "temporarily unavailable"│
+    │                              │                          │  (no custodial payout    │
+    │                              │                          │   from another pool)     │
 ```
 
-**What users see:** Nothing. The bank works. Deposits go to Tempo or Base. Withdrawals are served from healthy pools. Nobody even knows Arbitrum is down.
+**What users see:** Deposits and sends route around the dead chain (unchanged). Withdrawals work for any balance sitting on a healthy chain — invisible, same as always. If their entire balance is stranded on the dead chain, the withdraw button surfaces an honest "temporarily unavailable" message instead of building a transaction that would hang. Nobody sees chain names.
+
+**Why not custodial fulfillment?** Only Bob's passkey can burn his SyncUSD, and the burn must execute on the chain holding the tokens. Treasury cannot release USDC from a healthy pool on Bob's behalf without taking custody risk. Funds on a permanently dead chain are recovered later via the decommission drain procedure (which relocates holder balances to a healthy chain).
 
 ---
 

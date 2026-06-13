@@ -16,6 +16,7 @@ service TreasuryService {
   // User-facing queries
   rpc GetBalance(GetBalanceRequest) returns (GetBalanceResponse);
   rpc GetAccountActivity(GetAccountActivityRequest) returns (GetAccountActivityResponse);
+  rpc GetWithdrawalRouting(GetWithdrawalRoutingRequest) returns (GetWithdrawalRoutingResponse);
 
   // RouteReceiver-derived activation set (same view the hot-path relayer uses).
   rpc IsChainActive(IsChainActiveRequest) returns (IsChainActiveResponse);
@@ -69,6 +70,22 @@ message ActivityEntry {
 
 message GetAccountActivityResponse {
   repeated ActivityEntry entries = 1;
+}
+
+message GetWithdrawalRoutingRequest {
+  string address = 1;
+}
+
+message WithdrawalRoutingEntry {
+  uint64 chain_id         = 1;
+  string withdrawable_wei = 2;
+  bool   available        = 3;
+  string reason           = 4;  // empty when available; e.g. chain_inactive, insufficient_reserve
+  string balance_wei      = 5;  // user's SyncUSD on this chain (for unavailable display)
+}
+
+message GetWithdrawalRoutingResponse {
+  repeated WithdrawalRoutingEntry entries = 1;
 }
 
 message IsChainActiveRequest {

@@ -3,9 +3,7 @@
 ## Purpose
 
 Represent user balances as on-chain `SyncUSD` tokens, 1:1 backed by externally-held stablecoins (USDC) escrowed in Bank Contracts. The user's balance **is** their token balance — there is no off-chain ledger.
-
 ## Requirements
-
 ### Requirement: SyncUSD as the unit of account
 
 User balances SHALL be denominated in `SyncUSD`, a stablecoin issued by the bank and backed 1:1 by USDC held in reserve by the Bank Contract on each active chain. The total `SyncUSD` supply across all chains SHALL equal the total underlying USDC reserves.
@@ -38,7 +36,7 @@ When a user deposits an underlying stablecoin into a Bank Contract, the contract
 
 ### Requirement: Withdraw burns SyncUSD and returns underlying
 
-When a user withdraws, the Bank Contract SHALL burn the user's `SyncUSD` and release an equal amount of the underlying stablecoin from its reserve to the user's wallet.
+When a user withdraws, the Bank Contract SHALL burn the user's `SyncUSD` and release an equal amount of the underlying stablecoin from its reserve to the user's wallet. Withdrawal SHALL execute on the chain where the user's `SyncUSD` is held; it SHALL NOT be fulfilled custodially from another chain's pool or reserve. When the user holds `SyncUSD` on multiple chains, withdrawal MAY be executed on any active chain where the user holds balance, up to that chain's balance and reserve depth.
 
 #### Scenario: Bob withdraws $2,000
 
@@ -46,6 +44,13 @@ When a user withdraws, the Bank Contract SHALL burn the user's `SyncUSD` and rel
 - **THEN** 2,000 `SyncUSD` SHALL be burned from Bob
 - **AND** 2,000 USDC SHALL be released from the reserve to Bob's wallet
 - **AND** a `Withdrawn` event SHALL be emitted
+
+#### Scenario: Balance on an inactive chain is reported unavailable, not moved
+
+- **WHEN** Bob's only `SyncUSD` balance is on a chain that is inactive in RouteReceiver
+- **THEN** no service SHALL move or release Bob's funds from another chain's pool or reserve
+- **AND** the system SHALL report that amount as temporarily unavailable for withdrawal, with the reason
+- **AND** the funds SHALL become withdrawable when the chain recovers or after a decommission drain relocates them
 
 ### Requirement: Same-chain transfer is a plain token transfer
 
@@ -169,3 +174,4 @@ Each Bank Contract SHALL expose a `reserveDepth()` view returning the current US
 - **WHEN** the Bank Contract holds 250,000 USDC in reserve
 - **THEN** `reserveDepth()` SHALL return 250,000
 - **AND** the Treasury Service SHALL use that value when planning reserve rebalance operations
+

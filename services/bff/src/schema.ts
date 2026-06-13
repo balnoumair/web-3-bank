@@ -15,6 +15,14 @@ export const typeDefs = /* GraphQL */ `
     destChainId: String!
   }
 
+  type WithdrawalRoutingEntry {
+    chainId: String!
+    withdrawableWei: String!
+    available: Boolean!
+    reason: String
+    balanceWei: String!
+  }
+
   type Credential {
     credentialId: String!
     tempoAddress: String!
@@ -67,6 +75,9 @@ export const typeDefs = /* GraphQL */ `
 
     """Resolve a raw Tempo address to hot-path routing (requires auth)"""
     resolveRecipientRouting(tempoAddress: String!): RecipientRouting!
+
+    """Per-chain withdrawal routing for the authenticated user (requires auth)"""
+    withdrawalRouting: [WithdrawalRoutingEntry!]!
   }
 
   type Mutation {

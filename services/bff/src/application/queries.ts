@@ -6,6 +6,7 @@ import type {
   ITreasuryService,
   PoolDepth,
   Transfer,
+  WithdrawalRoutingEntry,
 } from "../domain/ports/treasury-service.js";
 
 export type QueryUseCases = ReturnType<typeof makeQueryUseCases>;
@@ -76,6 +77,9 @@ export function makeQueryUseCases(
 
     getRecentTransfers: (address: string, limit: number): Promise<Transfer[]> =>
       treasuryService.getAccountActivity(address, limit),
+
+    getWithdrawalRouting: (address: string): Promise<WithdrawalRoutingEntry[]> =>
+      treasuryService.getWithdrawalRouting(address),
 
     resolveUsername: async (
       username: string,

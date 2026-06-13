@@ -19,11 +19,20 @@ export type Transfer = {
   direction?: string | null;
 };
 
+export type WithdrawalRoutingEntry = {
+  chainId: string;
+  withdrawableWei: string;
+  available: boolean;
+  reason?: string | null;
+  balanceWei: string;
+};
+
 /** Driven port — implemented by the gRPC treasury-service adapter. */
 export interface ITreasuryService {
   getBalance(address: string): Promise<BalanceResult>;
   getPoolDepth(chainId: number): Promise<PoolDepth>;
   getAccountActivity(address: string, limit: number): Promise<Transfer[]>;
+  getWithdrawalRouting(address: string): Promise<WithdrawalRoutingEntry[]>;
   /** RouteReceiver-derived active set (same as hot-path relayer). */
   isChainActive(chainId: number): Promise<boolean>;
   /** Governance-finalized terminal chain state. */

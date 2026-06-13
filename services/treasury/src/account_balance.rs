@@ -159,7 +159,7 @@ impl AccountBalanceService {
     }
 }
 
-async fn read_chain_balance(
+pub(crate) async fn read_chain_balance(
     http: reqwest::Client,
     account_events: Arc<dyn AccountEventRepository>,
     sync_usd_cache: Arc<Mutex<HashMap<ChainId, String>>>,
