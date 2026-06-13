@@ -1,7 +1,10 @@
 pub mod abi;
+pub mod activity;
+pub mod balance;
 pub mod events;
 pub mod newtypes;
 pub mod rebalance;
 pub mod relay;
 pub mod repository;
 pub mod status;
+pub mod withdrawal_routing;

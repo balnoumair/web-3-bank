@@ -28,6 +28,20 @@ pub fn bytes_to_hex(bytes: &[u8]) -> String {
     s
 }
 
+/// Encode `balanceOf(address)` calldata (selector + 32-byte padded address).
+pub fn encode_balance_of(selector: &[u8; 4], address: &str) -> Option<String> {
+    let addr_hex = address.strip_prefix("0x").unwrap_or(address);
+    let addr_bytes = decode_hex(addr_hex)?;
+    if addr_bytes.len() != 20 {
+        return None;
+    }
+    let mut data = Vec::with_capacity(36);
+    data.extend_from_slice(selector);
+    data.extend_from_slice(&[0u8; 12]);
+    data.extend_from_slice(&addr_bytes);
+    Some(format!("0x{}", bytes_to_hex(&data)))
+}
+
 // ── RLP encoding ─────────────────────────────────────────────────────────────
 
 pub fn rlp_encode_uint(val: u64) -> Vec<u8> {

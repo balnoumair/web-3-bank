@@ -15,6 +15,14 @@ export const typeDefs = /* GraphQL */ `
     destChainId: String!
   }
 
+  type WithdrawalRoutingEntry {
+    chainId: String!
+    withdrawableWei: String!
+    available: Boolean!
+    reason: String
+    balanceWei: String!
+  }
+
   type Credential {
     credentialId: String!
     tempoAddress: String!
@@ -27,6 +35,12 @@ export const typeDefs = /* GraphQL */ `
     depthWei: String!
   }
 
+  type Balance {
+    amountWei: String!
+    """True when one or more chains used indexed fallback instead of live balanceOf."""
+    degraded: Boolean
+  }
+
   type Transfer {
     id: String!
     from: String!
@@ -34,6 +48,8 @@ export const typeDefs = /* GraphQL */ `
     amount: String!
     timestamp: String!
     txHash: String!
+    kind: String
+    direction: String
   }
 
   type AuthPayload {
@@ -45,8 +61,8 @@ export const typeDefs = /* GraphQL */ `
     """Returns current user profile from JWT session (requires auth)"""
     me: User!
 
-    """Returns the authenticated user's SyncUSD balance (requires auth)"""
-    balance: String!
+    """Returns the authenticated user's aggregated SyncUSD balance (requires auth)"""
+    balance: Balance!
 
     """Returns pool depth in wei for a given chain ID"""
     poolDepths(chainId: Int!): PoolDepth!
@@ -59,6 +75,9 @@ export const typeDefs = /* GraphQL */ `
 
     """Resolve a raw Tempo address to hot-path routing (requires auth)"""
     resolveRecipientRouting(tempoAddress: String!): RecipientRouting!
+
+    """Per-chain withdrawal routing for the authenticated user (requires auth)"""
+    withdrawalRouting: [WithdrawalRoutingEntry!]!
   }
 
   type Mutation {

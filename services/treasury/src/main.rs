@@ -1,3 +1,7 @@
+mod account_activity;
+mod account_balance;
+mod account_index;
+mod account_withdrawal_routing;
 mod cold_path;
 mod config;
 mod db;
@@ -5,7 +9,6 @@ pub mod decommission;
 pub mod domain;
 mod error;
 mod eth;
-mod home_chain;
 mod hot_path;
 mod pool_manager;
 mod reserve_path;
@@ -31,9 +34,12 @@ use sqlx::postgres::PgPoolOptions;
 use tonic::transport::Server;
 use tracing::info;
 
+use crate::account_activity::AccountActivityService;
+use crate::account_balance::AccountBalanceService;
+use crate::account_index::AccountIndexer;
+use crate::account_withdrawal_routing::AccountWithdrawalRoutingService;
 use crate::cold_path::ColdPath;
 use crate::config::Config;
-use crate::home_chain::HomeChainIndexer;
 use crate::hot_path::HotPath;
 use crate::pool_manager::PoolManager;
 use crate::proto::treasury::treasury_service_server::TreasuryServiceServer;
@@ -96,10 +102,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let snapshot_repo = Arc::new(db::PgPoolSnapshotRepository::new(pool.clone()));
     let reserve_repo: Arc<dyn crate::domain::repository::ReserveRepository> =
         Arc::new(db::PgReserveRepository::new(pool.clone()));
+    let account_event_repo: Arc<dyn crate::domain::repository::AccountEventRepository> =
+        Arc::new(db::PgAccountEventRepository::new(pool.clone()));
     let _decommission_repo: Arc<dyn crate::domain::repository::DecommissionRepository> =
         Arc::new(db::PgDecommissionRepository::new(pool.clone()));
 
     let hot_path = HotPath::new(Arc::clone(&relay_repo), Arc::clone(&cfg), http.clone());
+    let account_balance = AccountBalanceService::new(
+        Arc::clone(&cfg),
+        http.clone(),
+        Arc::clone(&account_event_repo),
+        Arc::clone(&hot_path),
+    );
+    let account_withdrawal_routing = AccountWithdrawalRoutingService::new(
+        Arc::clone(&cfg),
+        http.clone(),
+        Arc::clone(&account_event_repo),
+        Arc::clone(&hot_path),
+    );
+    let account_activity =
+        AccountActivityService::new(Arc::clone(&account_event_repo), Arc::clone(&relay_repo));
     let pool_manager = PoolManager::new(snapshot_repo, Arc::clone(&cfg), http.clone());
     let watcher = Watcher::new(watcher_repo, Arc::clone(&cfg), http.clone());
     let cold_path = ColdPath::new(rebalance_repo, Arc::clone(&cfg), http.clone());
@@ -112,11 +134,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Arc::clone(&cold_path).spawn_background();
     Arc::clone(&reserve_path).spawn_background();
 
-    if let Some(ref user_ep) = cfg.user_service_addr {
-        HomeChainIndexer::new(Arc::clone(&cfg), http.clone(), user_ep.clone()).spawn_background();
-    } else {
-        tracing::info!("home_chain: USER_SERVICE_ADDR not set — deposit indexer disabled");
-    }
+    AccountIndexer::new(
+        Arc::clone(&account_event_repo),
+        Arc::clone(&cfg),
+        http.clone(),
+        cfg.user_service_addr.clone(),
+    )
+    .spawn_background();
 
     // ── 5. Bind gRPC server ───────────────────────────────────────────────────
     let addr: SocketAddr = format!("0.0.0.0:{}", cfg.grpc_port).parse()?;
@@ -124,8 +148,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let svc = TreasuryServer {
         pool,
-        relay_repo,
         hot_path,
+        account_balance,
+        account_withdrawal_routing,
+        account_activity,
         pool_manager,
         watcher,
         relayer_key_loaded,

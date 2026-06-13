@@ -57,5 +57,10 @@ export function makeQueryResolvers(queries: QueryUseCases) {
       const user = requireAuth(ctx);
       return queries.resolveRecipientRouting(args.tempoAddress, user.chainId);
     },
+
+    withdrawalRouting: async (_: unknown, __: unknown, ctx: Context) => {
+      const { address } = requireAuth(ctx);
+      return queries.getWithdrawalRouting(address);
+    },
   };
 }

@@ -3,9 +3,11 @@ import * as protoLoader from "@grpc/proto-loader";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import type {
+  BalanceResult,
   ITreasuryService,
   PoolDepth,
   Transfer,
+  WithdrawalRoutingEntry,
 } from "../../domain/ports/treasury-service.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -26,6 +28,17 @@ const packageDef = protoLoader.loadSync(PROTO_PATH, {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const { treasury } = grpc.loadPackageDefinition(packageDef) as any;
 
+type ActivityEntryProto = {
+  kind: string;
+  direction: string;
+  counterparty: string;
+  chainId: string;
+  amountWei: string;
+  status: string;
+  txHash: string;
+  occurredAt: string;
+};
+
 /** gRPC adapter for the treasury-service — implements the ITreasuryService driven port. */
 export class GrpcTreasuryServiceAdapter implements ITreasuryService {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -38,13 +51,20 @@ export class GrpcTreasuryServiceAdapter implements ITreasuryService {
     );
   }
 
-  getBalance(address: string): Promise<string> {
+  getBalance(address: string): Promise<BalanceResult> {
     return new Promise((resolve, reject) => {
       this.client.getBalance(
         { address },
-        (err: grpc.ServiceError | null, res: { balanceWei: string }) => {
+        (
+          err: grpc.ServiceError | null,
+          res: { balanceWei: string; degraded?: boolean },
+        ) => {
           if (err) reject(grpcToError(err));
-          else resolve(res.balanceWei);
+          else
+            resolve({
+              amountWei: res.balanceWei,
+              degraded: res.degraded ?? false,
+            });
         },
       );
     });
@@ -62,37 +82,21 @@ export class GrpcTreasuryServiceAdapter implements ITreasuryService {
     });
   }
 
-  getRecentTransfers(address: string, limit: number): Promise<Transfer[]> {
+  getAccountActivity(address: string, limit: number): Promise<Transfer[]> {
     return new Promise((resolve, reject) => {
-      this.client.getRecentTransfers(
+      this.client.getAccountActivity(
         { address, limit },
         (
           err: grpc.ServiceError | null,
-          res: {
-            transfers: Array<{
-              sourceEventHash: string;
-              sourceChainId: string;
-              destChainId: string;
-              sender: string;
-              recipient: string;
-              amountWei: string;
-              status: string;
-              createdAt: string;
-            }>;
-          },
+          res: { entries: ActivityEntryProto[] },
         ) => {
           if (err) {
             reject(grpcToError(err));
           } else {
             resolve(
-              res.transfers.map((t) => ({
-                id: t.sourceEventHash,
-                from: t.sender,
-                to: t.recipient,
-                amount: t.amountWei,
-                timestamp: t.createdAt,
-                txHash: t.sourceEventHash,
-              })),
+              (res.entries ?? []).map((entry) =>
+                mapActivityEntry(entry, address),
+              ),
             );
           }
         },
@@ -123,6 +127,82 @@ export class GrpcTreasuryServiceAdapter implements ITreasuryService {
       );
     });
   }
+
+  getWithdrawalRouting(address: string): Promise<WithdrawalRoutingEntry[]> {
+    return new Promise((resolve, reject) => {
+      this.client.getWithdrawalRouting(
+        { address },
+        (
+          err: grpc.ServiceError | null,
+          res: {
+            entries: Array<{
+              chainId: string;
+              withdrawableWei: string;
+              available: boolean;
+              reason?: string;
+              balanceWei: string;
+            }>;
+          },
+        ) => {
+          if (err) {
+            reject(grpcToError(err));
+          } else {
+            resolve(
+              (res.entries ?? []).map((entry) => ({
+                chainId: entry.chainId,
+                withdrawableWei: entry.withdrawableWei,
+                available: entry.available,
+                reason: entry.reason || null,
+                balanceWei: entry.balanceWei,
+              })),
+            );
+          }
+        },
+      );
+    });
+  }
+}
+
+function mapActivityEntry(
+  entry: ActivityEntryProto,
+  userAddress: string,
+): Transfer {
+  const user = userAddress.toLowerCase();
+  const outgoing = entry.direction === "outgoing";
+
+  let from: string;
+  let to: string;
+
+  if (entry.kind === "deposit") {
+    from = "";
+    to = user;
+  } else if (entry.kind === "withdrawal") {
+    from = user;
+    to = "";
+  } else if (outgoing) {
+    from = user;
+    to = entry.counterparty?.toLowerCase() ?? "";
+  } else {
+    from = entry.counterparty?.toLowerCase() ?? "";
+    to = user;
+  }
+
+  const occurredAt = entry.occurredAt?.trim();
+  const timestamp =
+    occurredAt && /^\d+$/.test(occurredAt)
+      ? new Date(Number(occurredAt) * 1000).toISOString()
+      : occurredAt || new Date().toISOString();
+
+  return {
+    id: entry.txHash,
+    from,
+    to,
+    amount: entry.amountWei,
+    timestamp,
+    txHash: entry.txHash,
+    kind: entry.kind,
+    direction: entry.direction,
+  };
 }
 
 function grpcToError(err: grpc.ServiceError): Error {

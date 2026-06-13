@@ -8,6 +8,6 @@ export function useBalance() {
     queryFn: () => gql<BalanceResponse>(BALANCE_QUERY),
     enabled: !!getAuthToken(),
     refetchInterval: 10_000,
-    select: (data) => data.balance,
+    select: (data) => data.balance.amountWei,
   }));
 }

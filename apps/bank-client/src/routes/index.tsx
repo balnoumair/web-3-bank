@@ -2,6 +2,7 @@ import { Title } from "@solidjs/meta";
 import { createSignal, For, Show } from "solid-js";
 import { useAuth } from "~/contexts/auth-context";
 import { useBalance } from "~/hooks/use-balance";
+import { useWithdrawalRouting } from "~/hooks/use-withdrawal-routing";
 import { useTransfers } from "~/hooks/use-transfers";
 import { useDeposit } from "~/hooks/use-deposit";
 import { useWithdraw } from "~/hooks/use-withdraw";
@@ -15,6 +16,7 @@ import TransactionModal, { type TransactionType } from "~/components/Transaction
 export default function Home() {
   const auth = useAuth();
   const balance = useBalance();
+  const withdrawalRouting = useWithdrawalRouting();
   const transfers = useTransfers(8);
 
   const userAddress = () =>
@@ -45,6 +47,12 @@ export default function Home() {
     const raw = balance.data;
     if (!raw) return 0;
     return Number(raw) / 1e6; // SyncUSD has 6 decimals
+  };
+
+  const unavailableBalanceNumber = () => {
+    const raw = withdrawalRouting.data?.unavailableWei;
+    if (!raw || raw === 0n) return 0;
+    return Number(raw) / 1e6;
   };
 
   const handleModalSubmit = async (params: {
@@ -132,6 +140,20 @@ export default function Home() {
               />
               <span class="text-sm text-subtle">SyncUSD</span>
             </div>
+            <Show when={unavailableBalanceNumber() > 0}>
+              <div class="mt-3 pt-3 border-t border-edge/60">
+                <div class="text-xs text-muted mb-0.5">Unavailable for withdrawal</div>
+                <div class="text-sm font-medium text-muted">
+                  ${unavailableBalanceNumber().toLocaleString('en-US', {
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 2,
+                  })}
+                </div>
+                <p class="text-xs text-subtle mt-1">
+                  Temporarily frozen on a chain that is not processing transactions.
+                </p>
+              </div>
+            </Show>
           </Show>
         </div>
       </div>

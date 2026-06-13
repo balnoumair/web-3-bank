@@ -1,3 +1,4 @@
+pub mod account_event_repo;
 pub mod decommission_repo;
 pub mod pool_snapshot_repo;
 pub mod rebalance_repo;
@@ -5,6 +6,7 @@ pub mod relay_repo;
 pub mod reserve_repo;
 pub mod watcher_repo;
 
+pub use account_event_repo::PgAccountEventRepository;
 pub use decommission_repo::PgDecommissionRepository;
 pub use pool_snapshot_repo::PgPoolSnapshotRepository;
 pub use rebalance_repo::PgRebalanceRepository;

@@ -2,9 +2,11 @@ import type { IUserService, UserRecord } from "../domain/ports/user-service.js";
 import { resolveDestChainId } from "../domain/send-routing.js";
 
 import type {
+  BalanceResult,
   ITreasuryService,
   PoolDepth,
   Transfer,
+  WithdrawalRoutingEntry,
 } from "../domain/ports/treasury-service.js";
 
 export type QueryUseCases = ReturnType<typeof makeQueryUseCases>;
@@ -67,14 +69,17 @@ export function makeQueryUseCases(
       return { ...u, destChainId: null };
     },
 
-    getBalance: (address: string): Promise<string> =>
+    getBalance: (address: string): Promise<BalanceResult> =>
       treasuryService.getBalance(address),
 
     getPoolDepths: (chainId: number): Promise<PoolDepth> =>
       treasuryService.getPoolDepth(chainId),
 
     getRecentTransfers: (address: string, limit: number): Promise<Transfer[]> =>
-      treasuryService.getRecentTransfers(address, limit),
+      treasuryService.getAccountActivity(address, limit),
+
+    getWithdrawalRouting: (address: string): Promise<WithdrawalRoutingEntry[]> =>
+      treasuryService.getWithdrawalRouting(address),
 
     resolveUsername: async (
       username: string,
