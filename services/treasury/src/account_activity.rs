@@ -48,8 +48,7 @@ impl AccountActivityService {
                 None
             };
 
-            if let Some(view) =
-                map_event_to_activity(&row, &inner.address, relay_status.as_deref())
+            if let Some(view) = map_event_to_activity(&row, &inner.address, relay_status.as_deref())
             {
                 entries.push(ActivityEntry {
                     kind: view.kind,

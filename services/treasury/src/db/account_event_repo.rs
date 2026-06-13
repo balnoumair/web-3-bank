@@ -8,9 +8,7 @@ use sqlx::{PgPool, Row};
 use tracing::error;
 
 use crate::domain::newtypes::ChainId;
-use crate::domain::repository::{
-    AccountEventRepository, AccountEventRow, UpsertEventResult,
-};
+use crate::domain::repository::{AccountEventRepository, AccountEventRow, UpsertEventResult};
 
 pub struct PgAccountEventRepository {
     pool: PgPool,
@@ -79,16 +77,14 @@ impl AccountEventRepository for PgAccountEventRepository {
     }
 
     async fn get_cursor(&self, chain_id: ChainId) -> Option<u64> {
-        sqlx::query(
-            "SELECT last_block FROM treasury.index_cursors WHERE chain_id = $1",
-        )
-        .bind(chain_id.0 as i64)
-        .fetch_optional(&self.pool)
-        .await
-        .ok()
-        .flatten()
-        .and_then(|row| row.try_get::<i64, _>("last_block").ok())
-        .map(|b| b as u64)
+        sqlx::query("SELECT last_block FROM treasury.index_cursors WHERE chain_id = $1")
+            .bind(chain_id.0 as i64)
+            .fetch_optional(&self.pool)
+            .await
+            .ok()
+            .flatten()
+            .and_then(|row| row.try_get::<i64, _>("last_block").ok())
+            .map(|b| b as u64)
     }
 
     async fn user_has_deposit(&self, user_address: &str) -> bool {

@@ -36,8 +36,8 @@ use tracing::info;
 
 use crate::account_activity::AccountActivityService;
 use crate::account_balance::AccountBalanceService;
-use crate::account_withdrawal_routing::AccountWithdrawalRoutingService;
 use crate::account_index::AccountIndexer;
+use crate::account_withdrawal_routing::AccountWithdrawalRoutingService;
 use crate::cold_path::ColdPath;
 use crate::config::Config;
 use crate::hot_path::HotPath;
@@ -120,10 +120,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Arc::clone(&account_event_repo),
         Arc::clone(&hot_path),
     );
-    let account_activity = AccountActivityService::new(
-        Arc::clone(&account_event_repo),
-        Arc::clone(&relay_repo),
-    );
+    let account_activity =
+        AccountActivityService::new(Arc::clone(&account_event_repo), Arc::clone(&relay_repo));
     let pool_manager = PoolManager::new(snapshot_repo, Arc::clone(&cfg), http.clone());
     let watcher = Watcher::new(watcher_repo, Arc::clone(&cfg), http.clone());
     let cold_path = ColdPath::new(rebalance_repo, Arc::clone(&cfg), http.clone());

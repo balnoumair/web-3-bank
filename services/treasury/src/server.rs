@@ -20,8 +20,8 @@ use crate::proto::treasury::{
     GetAccountActivityResponse, GetBalanceRequest, GetBalanceResponse, GetPoolDepthRequest,
     GetPoolDepthResponse, GetRelayStatusRequest, GetRelayStatusResponse, GetWatcherAlertsRequest,
     GetWatcherAlertsResponse, GetWithdrawalRoutingRequest, GetWithdrawalRoutingResponse,
-    HealthCheckRequest, HealthCheckResponse, IsChainActiveRequest,
-    IsChainActiveResponse, IsChainDecommissionedRequest, IsChainDecommissionedResponse,
+    HealthCheckRequest, HealthCheckResponse, IsChainActiveRequest, IsChainActiveResponse,
+    IsChainDecommissionedRequest, IsChainDecommissionedResponse,
 };
 use crate::watcher::Watcher;
 

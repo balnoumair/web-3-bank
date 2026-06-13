@@ -15,9 +15,7 @@ use crate::account_balance::read_chain_balance;
 use crate::config::Config;
 use crate::domain::newtypes::ChainId;
 use crate::domain::repository::AccountEventRepository;
-use crate::domain::withdrawal_routing::{
-    compute_withdrawal_routing, ChainWithdrawalInput,
-};
+use crate::domain::withdrawal_routing::{compute_withdrawal_routing, ChainWithdrawalInput};
 use crate::eth;
 use crate::hot_path::HotPath;
 use crate::proto::treasury::{
@@ -169,14 +167,10 @@ async fn read_chain_withdrawal_input(
     )
     .await?;
 
-    let reserve_depth = eth::fetch_reserve_depth(
-        &http,
-        &rpc_url,
-        &bank_addr,
-        &reserve_depth_selector,
-    )
-    .await
-    .unwrap_or(U256::ZERO);
+    let reserve_depth =
+        eth::fetch_reserve_depth(&http, &rpc_url, &bank_addr, &reserve_depth_selector)
+            .await
+            .unwrap_or(U256::ZERO);
 
     Some(ChainWithdrawalInput {
         chain_id: chain_id.0,

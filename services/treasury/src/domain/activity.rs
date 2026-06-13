@@ -28,7 +28,12 @@ pub fn map_event_to_activity(
         .unwrap_or_default();
 
     match row.event_kind.as_str() {
-        "deposited" if row.address_to.as_deref().is_some_and(|a| a.eq_ignore_ascii_case(&user_lower)) => {
+        "deposited"
+            if row
+                .address_to
+                .as_deref()
+                .is_some_and(|a| a.eq_ignore_ascii_case(&user_lower)) =>
+        {
             Some(ActivityView {
                 kind: "deposit".into(),
                 direction: "incoming".into(),
@@ -40,7 +45,12 @@ pub fn map_event_to_activity(
                 occurred_at,
             })
         }
-        "withdrawn" if row.address_from.as_deref().is_some_and(|a| a.eq_ignore_ascii_case(&user_lower)) => {
+        "withdrawn"
+            if row
+                .address_from
+                .as_deref()
+                .is_some_and(|a| a.eq_ignore_ascii_case(&user_lower)) =>
+        {
             Some(ActivityView {
                 kind: "withdrawal".into(),
                 direction: "outgoing".into(),
@@ -74,7 +84,10 @@ pub fn map_event_to_activity(
             })
         }
         "hot_path_initiated"
-            if row.address_from.as_deref().is_some_and(|a| a.eq_ignore_ascii_case(&user_lower)) =>
+            if row
+                .address_from
+                .as_deref()
+                .is_some_and(|a| a.eq_ignore_ascii_case(&user_lower)) =>
         {
             let status = normalize_relay_status(relay_status);
             Some(ActivityView {
@@ -89,7 +102,10 @@ pub fn map_event_to_activity(
             })
         }
         "hot_path_released"
-            if row.address_to.as_deref().is_some_and(|a| a.eq_ignore_ascii_case(&user_lower)) =>
+            if row
+                .address_to
+                .as_deref()
+                .is_some_and(|a| a.eq_ignore_ascii_case(&user_lower)) =>
         {
             Some(ActivityView {
                 kind: "transfer".into(),
@@ -172,7 +188,12 @@ mod tests {
     #[test]
     fn hot_path_sender_shows_pending_without_relay() {
         let view = map_event_to_activity(
-            &row("hot_path_initiated", Some("0xBob"), Some("0xCharlie"), "1000"),
+            &row(
+                "hot_path_initiated",
+                Some("0xBob"),
+                Some("0xCharlie"),
+                "1000",
+            ),
             "0xBob",
             None,
         )
@@ -208,7 +229,12 @@ mod tests {
     #[test]
     fn excludes_unrelated_event_kinds() {
         assert!(map_event_to_activity(
-            &row("hot_path_initiated", Some("0xBob"), Some("0xCharlie"), "1000"),
+            &row(
+                "hot_path_initiated",
+                Some("0xBob"),
+                Some("0xCharlie"),
+                "1000"
+            ),
             "0xCharlie",
             None,
         )

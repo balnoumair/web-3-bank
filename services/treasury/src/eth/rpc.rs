@@ -165,7 +165,10 @@ pub async fn fetch_address_view(
     if bytes.len() < 32 {
         return None;
     }
-    Some(format!("0x{}", super::encoding::bytes_to_hex(&bytes[12..32])))
+    Some(format!(
+        "0x{}",
+        super::encoding::bytes_to_hex(&bytes[12..32])
+    ))
 }
 
 /// Live SyncUSD `balanceOf(address)` via `eth_call`.

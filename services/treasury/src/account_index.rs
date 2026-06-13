@@ -17,9 +17,7 @@ use tracing::{info, warn};
 
 use crate::config::Config;
 use crate::domain::newtypes::ChainId;
-use crate::domain::repository::{
-    AccountEventRepository, AccountEventRow, UpsertEventResult,
-};
+use crate::domain::repository::{AccountEventRepository, AccountEventRow, UpsertEventResult};
 use crate::eth;
 use crate::user_pb::{user_service_client::UserServiceClient, SetUserHomeChainRequest};
 
@@ -183,7 +181,9 @@ impl AccountIndexer {
             .await;
 
             for log in transfer_logs {
-                if let Some(row) = self.parse_transfer_log(&log, chain_id, rpc_url, bank_addr).await
+                if let Some(row) = self
+                    .parse_transfer_log(&log, chain_id, rpc_url, bank_addr)
+                    .await
                 {
                     self.ingest_row(row).await;
                 }
@@ -207,9 +207,8 @@ impl AccountIndexer {
             }
         }
 
-        let addr =
-            eth::fetch_address_view(&self.http, rpc_url, bank_addr, &self.sync_usd_selector)
-                .await?;
+        let addr = eth::fetch_address_view(&self.http, rpc_url, bank_addr, &self.sync_usd_selector)
+            .await?;
         self.sync_usd_cache
             .lock()
             .await
@@ -270,7 +269,11 @@ impl AccountIndexer {
         };
 
         let Ok(mut client) = UserServiceClient::connect(uri).await else {
-            warn!(user, chain_id = chain_id.0, "account_index: user-service unreachable");
+            warn!(
+                user,
+                chain_id = chain_id.0,
+                "account_index: user-service unreachable"
+            );
             return;
         };
 
@@ -288,7 +291,11 @@ impl AccountIndexer {
                 "account_index: SetUserHomeChain failed"
             );
         } else {
-            info!(user, chain_id = chain_id.0, "account_index: home chain set from deposit");
+            info!(
+                user,
+                chain_id = chain_id.0,
+                "account_index: home chain set from deposit"
+            );
         }
     }
 
@@ -310,10 +317,22 @@ impl AccountIndexer {
             return parse_withdrawn(log, chain_id, block_number, log_index, block_time_unix);
         }
         if topic0.eq_ignore_ascii_case(&self.bank_topics.hot_path_initiated) {
-            return parse_hot_path_initiated(log, chain_id, block_number, log_index, block_time_unix);
+            return parse_hot_path_initiated(
+                log,
+                chain_id,
+                block_number,
+                log_index,
+                block_time_unix,
+            );
         }
         if topic0.eq_ignore_ascii_case(&self.bank_topics.hot_path_released) {
-            return parse_hot_path_released(log, chain_id, block_number, log_index, block_time_unix);
+            return parse_hot_path_released(
+                log,
+                chain_id,
+                block_number,
+                log_index,
+                block_time_unix,
+            );
         }
         None
     }
@@ -363,10 +382,7 @@ impl AccountIndexer {
 }
 
 /// Home-chain notification fires only on a newly inserted first deposit.
-pub(crate) fn should_push_home_chain(
-    upsert: UpsertEventResult,
-    is_first_deposit: bool,
-) -> bool {
+pub(crate) fn should_push_home_chain(upsert: UpsertEventResult, is_first_deposit: bool) -> bool {
     upsert == UpsertEventResult::Inserted && is_first_deposit
 }
 
@@ -524,7 +540,10 @@ mod tests {
         let log = sample_deposited_log(user);
         let row = parse_deposited(&log, ChainId(84532), 42, 0, Some(1_700_000_000)).unwrap();
         assert_eq!(row.event_kind, "deposited");
-        assert_eq!(row.address_to.as_deref(), Some("0x1111111111111111111111111111111111111111"));
+        assert_eq!(
+            row.address_to.as_deref(),
+            Some("0x1111111111111111111111111111111111111111")
+        );
         assert_eq!(row.amount_wei, "5000");
     }
 
@@ -544,7 +563,10 @@ mod tests {
         };
         let row = parse_withdrawn(&log, ChainId(1), 16, 1, None).unwrap();
         assert_eq!(row.event_kind, "withdrawn");
-        assert_eq!(row.address_from.as_deref(), Some("0x2222222222222222222222222222222222222222"));
+        assert_eq!(
+            row.address_from.as_deref(),
+            Some("0x2222222222222222222222222222222222222222")
+        );
     }
 
     #[test]
