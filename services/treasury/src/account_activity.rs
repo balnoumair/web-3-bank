@@ -32,7 +32,7 @@ impl AccountActivityService {
         req: Request<GetAccountActivityRequest>,
     ) -> Result<Response<GetAccountActivityResponse>, Status> {
         let inner = req.into_inner();
-        let limit = inner.limit.max(1).min(100) as i64;
+        let limit = inner.limit.clamp(1, 100) as i64;
         let rows = self
             .account_events
             .list_activity_for_user(&inner.address, limit)

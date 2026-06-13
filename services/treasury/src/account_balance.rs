@@ -159,6 +159,7 @@ impl AccountBalanceService {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn read_chain_balance(
     http: reqwest::Client,
     account_events: Arc<dyn AccountEventRepository>,

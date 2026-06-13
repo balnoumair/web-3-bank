@@ -138,6 +138,7 @@ impl AccountWithdrawalRoutingService {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn read_chain_withdrawal_input(
     http: reqwest::Client,
     account_events: Arc<dyn AccountEventRepository>,
