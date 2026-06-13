@@ -15,7 +15,7 @@ service TreasuryService {
 
   // User-facing queries
   rpc GetBalance(GetBalanceRequest) returns (GetBalanceResponse);
-  rpc GetRecentTransfers(GetRecentTransfersRequest) returns (GetRecentTransfersResponse);
+  rpc GetAccountActivity(GetAccountActivityRequest) returns (GetAccountActivityResponse);
 
   // RouteReceiver-derived activation set (same view the hot-path relayer uses).
   rpc IsChainActive(IsChainActiveRequest) returns (IsChainActiveResponse);
@@ -45,23 +45,31 @@ message GetWatcherAlertsRequest  { uint32 limit = 1; }
 message GetWatcherAlertsResponse { repeated string alert_ids = 1; }
 
 message GetBalanceRequest  { string address = 1; }
-message GetBalanceResponse { string balance_wei = 1; }
+message GetBalanceResponse {
+  string balance_wei = 1;
+  // True when one or more chains used the indexed fallback instead of live balanceOf.
+  bool degraded = 2;
+}
 
-message GetRecentTransfersRequest {
+message GetAccountActivityRequest {
   string address = 1;
   uint32 limit   = 2;
 }
-message TransferRecord {
-  string source_event_hash = 1;
-  uint64 source_chain_id   = 2;
-  uint64 dest_chain_id     = 3;
-  string sender            = 4;
-  string recipient         = 5;
-  string amount_wei        = 6;
-  string status            = 7;
-  string created_at        = 8;
+
+message ActivityEntry {
+  string kind         = 1;  // deposit | withdrawal | transfer | hot_path
+  string direction    = 2;  // incoming | outgoing
+  string counterparty = 3;
+  uint64 chain_id     = 4;
+  string amount_wei   = 5;
+  string status       = 6;  // completed | pending | failed
+  string tx_hash      = 7;
+  string occurred_at  = 8;  // RFC3339 block time when indexed
 }
-message GetRecentTransfersResponse { repeated TransferRecord transfers = 1; }
+
+message GetAccountActivityResponse {
+  repeated ActivityEntry entries = 1;
+}
 
 message IsChainActiveRequest {
   uint64 chain_id = 1;

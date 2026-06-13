@@ -14,6 +14,10 @@ use crate::error::TxError;
 pub struct RpcLog {
     #[serde(rename = "transactionHash", default)]
     pub transaction_hash: String,
+    #[serde(rename = "blockNumber", default)]
+    pub block_number: String,
+    #[serde(rename = "logIndex", default)]
+    pub log_index: String,
     #[serde(default)]
     pub topics: Vec<String>,
     pub data: String,
@@ -65,6 +69,135 @@ pub async fn fetch_logs(
         Err(_) => return vec![],
     };
     serde_json::from_value(resp["result"].clone()).unwrap_or_default()
+}
+
+/// Like [`fetch_logs`] but matches any of the given topic0 values (OR filter).
+pub async fn fetch_logs_any(
+    http: &reqwest::Client,
+    rpc_url: &str,
+    address: &str,
+    topics: &[String],
+    from_block: u64,
+    to_block: u64,
+) -> Vec<RpcLog> {
+    if topics.is_empty() {
+        return vec![];
+    }
+    let body = serde_json::json!({
+        "jsonrpc": "2.0",
+        "method": "eth_getLogs",
+        "params": [{
+            "address": address,
+            "topics": [topics],
+            "fromBlock": format!("0x{:x}", from_block),
+            "toBlock":   format!("0x{:x}", to_block)
+        }],
+        "id": 1
+    });
+    let resp: serde_json::Value = match http.post(rpc_url).json(&body).send().await {
+        Ok(r) => match r.json().await {
+            Ok(v) => v,
+            Err(_) => return vec![],
+        },
+        Err(_) => return vec![],
+    };
+    serde_json::from_value(resp["result"].clone()).unwrap_or_default()
+}
+
+/// Decode a hex quantity field from JSON-RPC (e.g. blockNumber, logIndex).
+pub fn parse_hex_u64(hex: &str) -> Option<u64> {
+    if hex.is_empty() {
+        return None;
+    }
+    u64::from_str_radix(hex.trim_start_matches("0x"), 16).ok()
+}
+
+/// Fetch the Unix timestamp for a block via `eth_getBlockByNumber`.
+pub async fn fetch_block_timestamp(
+    http: &reqwest::Client,
+    rpc_url: &str,
+    block_number: u64,
+) -> Option<i64> {
+    let body = serde_json::json!({
+        "jsonrpc": "2.0",
+        "method": "eth_getBlockByNumber",
+        "params": [format!("0x{:x}", block_number), false],
+        "id": 1
+    });
+    let resp: serde_json::Value = http
+        .post(rpc_url)
+        .json(&body)
+        .send()
+        .await
+        .ok()?
+        .json()
+        .await
+        .ok()?;
+    let ts_hex = resp["result"]["timestamp"].as_str()?;
+    let ts = u64::from_str_radix(ts_hex.trim_start_matches("0x"), 16).ok()?;
+    Some(ts as i64)
+}
+
+/// Call a view function returning an address (32-byte ABI word, right-aligned).
+pub async fn fetch_address_view(
+    http: &reqwest::Client,
+    rpc_url: &str,
+    contract_addr: &str,
+    selector: &[u8; 4],
+) -> Option<String> {
+    let call_data = format!("0x{}", super::encoding::bytes_to_hex(selector));
+    let body = serde_json::json!({
+        "jsonrpc": "2.0",
+        "method": "eth_call",
+        "params": [{"to": contract_addr, "data": call_data}, "latest"],
+        "id": 1
+    });
+    let resp: serde_json::Value = http
+        .post(rpc_url)
+        .json(&body)
+        .send()
+        .await
+        .ok()?
+        .json()
+        .await
+        .ok()?;
+    let bytes = super::encoding::decode_hex(resp["result"].as_str()?)?;
+    if bytes.len() < 32 {
+        return None;
+    }
+    Some(format!("0x{}", super::encoding::bytes_to_hex(&bytes[12..32])))
+}
+
+/// Live SyncUSD `balanceOf(address)` via `eth_call`.
+pub async fn fetch_balance_of(
+    http: &reqwest::Client,
+    rpc_url: &str,
+    token_addr: &str,
+    user_addr: &str,
+    selector: &[u8; 4],
+) -> Option<U256> {
+    let call_data = super::encoding::encode_balance_of(selector, user_addr)?;
+    let body = serde_json::json!({
+        "jsonrpc": "2.0",
+        "method": "eth_call",
+        "params": [{"to": token_addr, "data": call_data}, "latest"],
+        "id": 1
+    });
+    let resp: serde_json::Value = http
+        .post(rpc_url)
+        .json(&body)
+        .send()
+        .await
+        .ok()?
+        .json()
+        .await
+        .ok()?;
+    let bytes = super::encoding::decode_hex(resp["result"].as_str()?)?;
+    if bytes.len() < 32 {
+        return None;
+    }
+    let arr: [u8; 32] = bytes[..32].try_into().ok()?;
+    Some(U256::from_be_bytes(arr))
 }
 
 pub async fn fetch_pool_depth(

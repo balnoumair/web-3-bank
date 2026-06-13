@@ -74,8 +74,14 @@ Bob's Browser                    Tempo Chain                    Treasury Service
     │                                │                              │
     │  Tx confirmed (~0.5s) ◄────────┤                              │
     │                                │                              │
-    ├─ wagmi detects balance change  │                              │
-    │  via tanstack-query refetch    │                              │
+    │                                │  Treasury indexes Deposited  │
+    │                                │  event → pushes home chain   │
+    │                                │  to User Service             │
+    │                                │                              │
+    ├─ Dashboard polls BFF `balance` │                              │
+    │  (Treasury aggregates live     │                              │
+    │   balanceOf across chains)     │                              │
+    │  every ~10s via GraphQL          │                              │
 ```
 
 **What Bob sees:** Balance updates to **$5,000.00**. A small "Deposit confirmed" toast. The whole thing took ~2 seconds.

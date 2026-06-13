@@ -1,9 +1,15 @@
 export const BALANCE_QUERY = `
   query Balance {
-    balance
+    balance {
+      amountWei
+      degraded
+    }
   }
 `;
 
 export interface BalanceResponse {
-  balance: string;
+  balance: {
+    amountWei: string;
+    degraded?: boolean | null;
+  };
 }

@@ -65,6 +65,11 @@ pub struct Config {
     #[serde(default = "default_cold_path_poll_secs")]
     pub cold_path_poll_secs: u64,
 
+    /// Optional JSON map of chain_id → block number to start indexing from
+    /// when no cursor exists yet. Default: block 0.
+    #[serde(default)]
+    pub index_from_blocks: Option<JsonMap<u64, u64>>,
+
     /// Optional `host:port` for user-service gRPC (e.g. `127.0.0.1:50051`).
     /// When set, the treasury indexes `Deposited` events and calls
     /// `SetUserHomeChain` so first-deposit home routing is recorded.

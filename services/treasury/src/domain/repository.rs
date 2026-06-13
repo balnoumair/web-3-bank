@@ -13,18 +13,6 @@ use crate::domain::status::{AlertType, RelayStatus};
 
 // ── Shared types ─────────────────────────────────────────────────────────────
 
-/// A relay log row returned by user-facing transfer queries.
-pub struct TransferRow {
-    pub source_event_hash: String,
-    pub source_chain_id: i64,
-    pub dest_chain_id: i64,
-    pub sender: String,
-    pub recipient: String,
-    pub amount_wei: String,
-    pub status: String,
-    pub created_at: String,
-}
-
 // ── Relay repository (hot-path) ─────────────────────────────────────────────
 
 #[async_trait]
@@ -54,13 +42,6 @@ pub trait RelayRepository: Send + Sync {
     /// Get the relay status for a source event hash. Returns `None` if
     /// no relay log exists.
     async fn get_relay_status(&self, source_event_hash: &EventHash) -> Option<String>;
-
-    /// Sum of `amount_wei` for all completed relays to this recipient address.
-    /// Returns `"0"` if none found.
-    async fn get_balance(&self, address: &str) -> String;
-
-    /// Most recent relay log rows for a recipient address, newest first.
-    async fn get_recent_transfers(&self, address: &str, limit: i64) -> Vec<TransferRow>;
 }
 
 // ── Watcher repository ──────────────────────────────────────────────────────
@@ -234,6 +215,54 @@ pub trait DecommissionRepository: Send + Sync {
     async fn mark_holder_completed(&self, op_id: &OperationId);
 
     async fn mark_op_failed(&self, op_id: &OperationId, failure_reason: &str);
+}
+
+// ── Account event repository (event index) ───────────────────────────────────
+
+/// One row in `treasury.account_events`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AccountEventRow {
+    pub chain_id: i64,
+    pub tx_hash: String,
+    pub log_index: i32,
+    pub event_kind: String,
+    pub address_from: Option<String>,
+    pub address_to: Option<String>,
+    pub amount_wei: String,
+    pub block_number: i64,
+    /// Unix timestamp (seconds) for the block that emitted this event.
+    pub block_time_unix: Option<i64>,
+    pub correlation: Option<String>,
+}
+
+/// Result of an idempotent event upsert.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UpsertEventResult {
+    Inserted,
+    AlreadyExists,
+}
+
+#[async_trait]
+pub trait AccountEventRepository: Send + Sync {
+    /// Insert an event row; returns `AlreadyExists` on duplicate
+    /// `(chain_id, tx_hash, log_index)`.
+    async fn upsert_event(&self, row: &AccountEventRow) -> UpsertEventResult;
+
+    /// Persist the block cursor for a chain (upsert).
+    async fn set_cursor(&self, chain_id: ChainId, last_block: u64);
+
+    /// Load the persisted cursor for a chain. Returns `None` when never indexed.
+    async fn get_cursor(&self, chain_id: ChainId) -> Option<u64>;
+
+    /// True when the user already has at least one indexed `deposited` event.
+    async fn user_has_deposit(&self, user_address: &str) -> bool;
+
+    /// Estimate a user's SyncUSD balance on one chain from indexed events
+    /// (fallback when live `balanceOf` RPC fails).
+    async fn indexed_balance_on_chain(&self, chain_id: ChainId, address: &str) -> String;
+
+    /// User-visible activity entries, newest first.
+    async fn list_activity_for_user(&self, address: &str, limit: i64) -> Vec<AccountEventRow>;
 }
 
 // ── Pool snapshot repository ────────────────────────────────────────────────
