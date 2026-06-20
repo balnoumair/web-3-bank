@@ -119,9 +119,14 @@ pub struct RuntimeChainState {
 }
 
 impl RuntimeChainState {
-    pub fn new(hot_path: Arc<crate::hot_path::HotPath>, cfg: Arc<Config>, http: reqwest::Client) -> Self {
+    pub fn new(
+        hot_path: Arc<crate::hot_path::HotPath>,
+        cfg: Arc<Config>,
+        http: reqwest::Client,
+    ) -> Self {
         let mut decommission_selector = [0u8; 4];
-        decommission_selector.copy_from_slice(&keccak256(b"getChainDecommissionStatus(uint256)")[..4]);
+        decommission_selector
+            .copy_from_slice(&keccak256(b"getChainDecommissionStatus(uint256)")[..4]);
         Self {
             hot_path,
             cfg,
@@ -244,9 +249,10 @@ impl RuntimeBankDrain {
         let tx_hash = eth::send_raw_transaction(&self.http, rpc_url, &raw_hex)
             .await
             .map_err(|e| e.to_string())?;
-        let logs = eth::wait_for_receipt_logs(&self.http, rpc_url, &tx_hash, Duration::from_secs(90))
-            .await
-            .map_err(|e| e.to_string())?;
+        let logs =
+            eth::wait_for_receipt_logs(&self.http, rpc_url, &tx_hash, Duration::from_secs(90))
+                .await
+                .map_err(|e| e.to_string())?;
         self.nonce_cache
             .lock()
             .await
@@ -435,9 +441,10 @@ pub async fn build_drain_plan(
     let pool_amount = eth::fetch_pool_depth(&http, source_rpc, source_bank, &pool_selector)
         .await
         .unwrap_or(U256::ZERO);
-    let reserve_amount = eth::fetch_reserve_depth(&http, source_rpc, source_bank, &reserve_selector)
-        .await
-        .unwrap_or(U256::ZERO);
+    let reserve_amount =
+        eth::fetch_reserve_depth(&http, source_rpc, source_bank, &reserve_selector)
+            .await
+            .unwrap_or(U256::ZERO);
     DrainPlan {
         source_chain,
         target_chain,
@@ -513,7 +520,11 @@ pub fn make_drain_id(source_chain: ChainId, target_chain: ChainId) -> String {
 
 pub fn log_resumable(pair: Option<(ChainId, ChainId)>) {
     if let Some((src, dst)) = pair {
-        info!(source_chain = src.0, target_chain = dst.0, "decommission: resumable drain detected");
+        info!(
+            source_chain = src.0,
+            target_chain = dst.0,
+            "decommission: resumable drain detected"
+        );
     } else {
         info!("decommission: no resumable drain detected");
     }

@@ -26,9 +26,9 @@ use crate::domain::repository::DecommissionRepository;
 use crate::hot_path::HotPath;
 use crate::pool_manager::PoolManager;
 use crate::proto::treasury::{
-    DecommissionStatusCount, GetDecommissionDrainStatusRequest, GetDecommissionDrainStatusResponse,
-    health_check_response, treasury_service_server::TreasuryService, GetAccountActivityRequest,
-    GetAccountActivityResponse, GetBalanceRequest, GetBalanceResponse, GetPoolDepthRequest,
+    health_check_response, treasury_service_server::TreasuryService, DecommissionStatusCount,
+    GetAccountActivityRequest, GetAccountActivityResponse, GetBalanceRequest, GetBalanceResponse,
+    GetDecommissionDrainStatusRequest, GetDecommissionDrainStatusResponse, GetPoolDepthRequest,
     GetPoolDepthResponse, GetRelayStatusRequest, GetRelayStatusResponse, GetWatcherAlertsRequest,
     GetWatcherAlertsResponse, GetWithdrawalRoutingRequest, GetWithdrawalRoutingResponse,
     HealthCheckRequest, HealthCheckResponse, IsChainActiveRequest, IsChainActiveResponse,
@@ -177,7 +177,11 @@ impl TreasuryService for TreasuryServer {
                 "account_events index cursor is too stale for source chain",
             ));
         }
-        if !self.chain_state_runtime.is_source_draining(source_chain).await {
+        if !self
+            .chain_state_runtime
+            .is_source_draining(source_chain)
+            .await
+        {
             return Err(Status::failed_precondition(
                 "source chain is not marked draining in RouteReceiver",
             ));
@@ -185,7 +189,11 @@ impl TreasuryService for TreasuryServer {
         if !self.chain_state_runtime.is_chain_active(target_chain).await {
             return Err(Status::failed_precondition("target chain is not active"));
         }
-        if !self.bank_drain_runtime.has_required_roles(source_chain).await {
+        if !self
+            .bank_drain_runtime
+            .has_required_roles(source_chain)
+            .await
+        {
             return Err(Status::failed_precondition(
                 "treasury signer missing required bank roles",
             ));
@@ -227,11 +235,13 @@ impl TreasuryService for TreasuryServer {
             .decommission_dust_tolerance_wei
             .parse::<u128>()
             .unwrap_or(0);
-        let holder_total = plan
-            .holders
-            .iter()
-            .fold(0u128, |acc, holder| acc.saturating_add(holder.amount.to::<u128>()));
-        if holder_total <= dust_tolerance && plan.pool_amount.is_zero() && plan.reserve_amount.is_zero() {
+        let holder_total = plan.holders.iter().fold(0u128, |acc, holder| {
+            acc.saturating_add(holder.amount.to::<u128>())
+        });
+        if holder_total <= dust_tolerance
+            && plan.pool_amount.is_zero()
+            && plan.reserve_amount.is_zero()
+        {
             return Err(Status::failed_precondition(
                 "drain plan has no actionable balances above dust tolerance",
             ));
@@ -316,10 +326,16 @@ fn derive_drain_state(
     if running_drain_id == Some(requested_drain_id) {
         return "running".to_string();
     }
-    if counts.iter().any(|(status, _)| status == "paused" || status == "failed") {
+    if counts
+        .iter()
+        .any(|(status, _)| status == "paused" || status == "failed")
+    {
         return "paused".to_string();
     }
-    if counts.iter().any(|(status, _)| status == "pending" || status == "submitted") {
+    if counts
+        .iter()
+        .any(|(status, _)| status == "pending" || status == "submitted")
+    {
         return "resumable".to_string();
     }
     "completed".to_string()
@@ -363,11 +379,9 @@ pub async fn check_rpc_reachable(
 
 impl TreasuryServer {
     fn check_decommission_admin<T>(&self, req: &Request<T>) -> Result<(), Status> {
-        let expected = self
-            .cfg
-            .decommission_admin_token
-            .as_ref()
-            .ok_or_else(|| Status::failed_precondition("DECOMMISSION_ADMIN_TOKEN is not configured"))?;
+        let expected = self.cfg.decommission_admin_token.as_ref().ok_or_else(|| {
+            Status::failed_precondition("DECOMMISSION_ADMIN_TOKEN is not configured")
+        })?;
 
         if let Some(raw) = req
             .metadata()

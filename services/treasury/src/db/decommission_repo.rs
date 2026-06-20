@@ -147,7 +147,11 @@ impl DecommissionRepository for PgDecommissionRepository {
         .map(|(src, dst)| (ChainId(src as u64), ChainId(dst as u64)))
     }
 
-    async fn status_counts(&self, source_chain: ChainId, target_chain: ChainId) -> Vec<(String, u64)> {
+    async fn status_counts(
+        &self,
+        source_chain: ChainId,
+        target_chain: ChainId,
+    ) -> Vec<(String, u64)> {
         let rows = sqlx::query_as::<_, (String, i64)>(
             "SELECT status, COUNT(*)::BIGINT AS count
              FROM treasury.decommission_ops
@@ -159,7 +163,9 @@ impl DecommissionRepository for PgDecommissionRepository {
         .fetch_all(&self.pool)
         .await
         .unwrap_or_default();
-        rows.into_iter().map(|(s, c)| (s, c.max(0) as u64)).collect()
+        rows.into_iter()
+            .map(|(s, c)| (s, c.max(0) as u64))
+            .collect()
     }
 
     async fn drained_amount_wei(&self, source_chain: ChainId, target_chain: ChainId) -> String {

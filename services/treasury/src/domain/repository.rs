@@ -220,7 +220,11 @@ pub trait DecommissionRepository: Send + Sync {
 
     async fn latest_incomplete_pair(&self) -> Option<(ChainId, ChainId)>;
 
-    async fn status_counts(&self, source_chain: ChainId, target_chain: ChainId) -> Vec<(String, u64)>;
+    async fn status_counts(
+        &self,
+        source_chain: ChainId,
+        target_chain: ChainId,
+    ) -> Vec<(String, u64)>;
 
     async fn drained_amount_wei(&self, source_chain: ChainId, target_chain: ChainId) -> String;
 

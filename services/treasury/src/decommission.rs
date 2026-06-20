@@ -311,11 +311,19 @@ mod tests {
             Vec::new()
         }
 
-        async fn drained_amount_wei(&self, _source_chain: ChainId, _target_chain: ChainId) -> String {
+        async fn drained_amount_wei(
+            &self,
+            _source_chain: ChainId,
+            _target_chain: ChainId,
+        ) -> String {
             "0".to_string()
         }
 
-        async fn last_error(&self, _source_chain: ChainId, _target_chain: ChainId) -> Option<String> {
+        async fn last_error(
+            &self,
+            _source_chain: ChainId,
+            _target_chain: ChainId,
+        ) -> Option<String> {
             None
         }
     }
