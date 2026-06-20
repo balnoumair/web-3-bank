@@ -215,6 +215,16 @@ pub trait DecommissionRepository: Send + Sync {
     async fn mark_holder_completed(&self, op_id: &OperationId);
 
     async fn mark_op_failed(&self, op_id: &OperationId, failure_reason: &str);
+
+    async fn has_incomplete_ops(&self) -> bool;
+
+    async fn latest_incomplete_pair(&self) -> Option<(ChainId, ChainId)>;
+
+    async fn status_counts(&self, source_chain: ChainId, target_chain: ChainId) -> Vec<(String, u64)>;
+
+    async fn drained_amount_wei(&self, source_chain: ChainId, target_chain: ChainId) -> String;
+
+    async fn last_error(&self, source_chain: ChainId, target_chain: ChainId) -> Option<String>;
 }
 
 // ── Account event repository (event index) ───────────────────────────────────

@@ -76,6 +76,25 @@ pub struct Config {
     #[serde(default)]
     pub user_service_addr: Option<String>,
 
+    /// Admin token required to trigger decommission drain RPCs.
+    #[serde(default)]
+    pub decommission_admin_token: Option<String>,
+
+    /// Token used by treasury when calling user-service `SetUserHomeChain`
+    /// with `decommission_override=true`.
+    #[serde(default)]
+    pub decommission_orchestrator_token: Option<String>,
+
+    /// Max tolerated lag (in blocks) between account_events cursor and head
+    /// before decommission drain start is rejected.
+    #[serde(default = "default_decommission_index_head_tolerance_blocks")]
+    pub decommission_index_head_tolerance_blocks: u64,
+
+    /// Residual supply dust tolerance (wei) allowed after holder drain before
+    /// pausing instead of draining pool/reserve.
+    #[serde(default)]
+    pub decommission_dust_tolerance_wei: String,
+
     /// Seconds before an in-flight CCIP rebalance requires manual review.
     /// Default: 1800 (30 minutes).
     #[serde(default = "default_cold_path_stuck_message_timeout_secs")]
@@ -161,6 +180,10 @@ fn default_reserve_path_stuck_timeout_secs() -> u64 {
 
 fn default_circle_attestation_url() -> String {
     "https://iris-api.circle.com".to_string()
+}
+
+fn default_decommission_index_head_tolerance_blocks() -> u64 {
+    20
 }
 
 impl Config {

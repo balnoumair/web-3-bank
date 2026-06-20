@@ -119,4 +119,76 @@ impl DecommissionRepository for PgDecommissionRepository {
             error!(op_id = op_id.as_str(), err = %e, "decommission_repo: failure update failed");
         }
     }
+
+    async fn has_incomplete_ops(&self) -> bool {
+        sqlx::query_scalar::<_, bool>(
+            "SELECT EXISTS(
+                SELECT 1 FROM treasury.decommission_ops
+                WHERE status IN ('pending', 'submitted', 'paused')
+            )",
+        )
+        .fetch_one(&self.pool)
+        .await
+        .unwrap_or(false)
+    }
+
+    async fn latest_incomplete_pair(&self) -> Option<(ChainId, ChainId)> {
+        sqlx::query_as::<_, (i64, i64)>(
+            "SELECT chain_id, dst_chain_id
+             FROM treasury.decommission_ops
+             WHERE status IN ('pending', 'submitted', 'paused')
+             ORDER BY started_at DESC
+             LIMIT 1",
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .ok()
+        .flatten()
+        .map(|(src, dst)| (ChainId(src as u64), ChainId(dst as u64)))
+    }
+
+    async fn status_counts(&self, source_chain: ChainId, target_chain: ChainId) -> Vec<(String, u64)> {
+        let rows = sqlx::query_as::<_, (String, i64)>(
+            "SELECT status, COUNT(*)::BIGINT AS count
+             FROM treasury.decommission_ops
+             WHERE chain_id = $1 AND dst_chain_id = $2
+             GROUP BY status",
+        )
+        .bind(source_chain.0 as i64)
+        .bind(target_chain.0 as i64)
+        .fetch_all(&self.pool)
+        .await
+        .unwrap_or_default();
+        rows.into_iter().map(|(s, c)| (s, c.max(0) as u64)).collect()
+    }
+
+    async fn drained_amount_wei(&self, source_chain: ChainId, target_chain: ChainId) -> String {
+        sqlx::query_scalar::<_, String>(
+            "SELECT COALESCE(SUM(amount), 0)::TEXT
+             FROM treasury.decommission_ops
+             WHERE chain_id = $1 AND dst_chain_id = $2 AND status = 'completed'",
+        )
+        .bind(source_chain.0 as i64)
+        .bind(target_chain.0 as i64)
+        .fetch_one(&self.pool)
+        .await
+        .unwrap_or_else(|_| "0".to_string())
+    }
+
+    async fn last_error(&self, source_chain: ChainId, target_chain: ChainId) -> Option<String> {
+        sqlx::query_scalar::<_, Option<String>>(
+            "SELECT failure_reason
+             FROM treasury.decommission_ops
+             WHERE chain_id = $1 AND dst_chain_id = $2 AND failure_reason IS NOT NULL
+             ORDER BY started_at DESC
+             LIMIT 1",
+        )
+        .bind(source_chain.0 as i64)
+        .bind(target_chain.0 as i64)
+        .fetch_optional(&self.pool)
+        .await
+        .ok()
+        .flatten()
+        .flatten()
+    }
 }

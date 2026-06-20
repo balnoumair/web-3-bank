@@ -6,6 +6,7 @@ mod cold_path;
 mod config;
 mod db;
 pub mod decommission;
+mod decommission_runtime;
 pub mod domain;
 mod error;
 mod eth;
@@ -40,11 +41,16 @@ use crate::account_index::AccountIndexer;
 use crate::account_withdrawal_routing::AccountWithdrawalRoutingService;
 use crate::cold_path::ColdPath;
 use crate::config::Config;
+use crate::decommission::DecommissionOrchestrator;
+use crate::decommission_runtime::{
+    log_resumable, make_drain_id, RuntimeAlerts, RuntimeBankDrain, RuntimeChainState,
+    RuntimeHolderIndex, RuntimeUserHomeChain,
+};
 use crate::hot_path::HotPath;
 use crate::pool_manager::PoolManager;
 use crate::proto::treasury::treasury_service_server::TreasuryServiceServer;
 use crate::reserve_path::ReservePath;
-use crate::server::{check_relayer_key, check_rpc_reachable, TreasuryServer};
+use crate::server::{check_relayer_key, check_rpc_reachable, DrainRuntimeState, TreasuryServer};
 use crate::watcher::Watcher;
 
 #[tokio::main]
@@ -104,7 +110,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Arc::new(db::PgReserveRepository::new(pool.clone()));
     let account_event_repo: Arc<dyn crate::domain::repository::AccountEventRepository> =
         Arc::new(db::PgAccountEventRepository::new(pool.clone()));
-    let _decommission_repo: Arc<dyn crate::domain::repository::DecommissionRepository> =
+    let decommission_repo: Arc<dyn crate::domain::repository::DecommissionRepository> =
         Arc::new(db::PgDecommissionRepository::new(pool.clone()));
 
     let hot_path = HotPath::new(Arc::clone(&relay_repo), Arc::clone(&cfg), http.clone());
@@ -126,6 +132,41 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let watcher = Watcher::new(watcher_repo, Arc::clone(&cfg), http.clone());
     let cold_path = ColdPath::new(rebalance_repo, Arc::clone(&cfg), http.clone());
     let reserve_path = ReservePath::new(reserve_repo, Arc::clone(&cfg), http.clone());
+    let holder_index_runtime = Arc::new(RuntimeHolderIndex::new(
+        Arc::clone(&cfg),
+        http.clone(),
+        pool.clone(),
+    ));
+    let chain_state_runtime = Arc::new(RuntimeChainState::new(
+        Arc::clone(&hot_path),
+        Arc::clone(&cfg),
+        http.clone(),
+    ));
+    let bank_drain_runtime = Arc::new(
+        RuntimeBankDrain::new(Arc::clone(&cfg), http.clone())
+            .ok_or("invalid or missing RELAYER_KEY_PATH for decommission drain")?,
+    );
+    let user_home_runtime = Arc::new(RuntimeUserHomeChain::new(Arc::clone(&cfg)));
+    let alerts_runtime = Arc::new(RuntimeAlerts);
+    let chain_state_port: Arc<dyn crate::decommission::ChainStatePort> =
+        chain_state_runtime.clone();
+    let holder_index_port: Arc<dyn crate::decommission::HolderIndexPort> =
+        holder_index_runtime.clone();
+    let bank_drain_port: Arc<dyn crate::decommission::BankDrainPort> = bank_drain_runtime.clone();
+    let user_home_port: Arc<dyn crate::decommission::UserHomeChainPort> = user_home_runtime;
+    let alerts_port: Arc<dyn crate::decommission::OperatorAlertPort> = alerts_runtime;
+    let decommission_orchestrator = Arc::new(DecommissionOrchestrator::new(
+        Arc::clone(&decommission_repo),
+        chain_state_port,
+        holder_index_port,
+        bank_drain_port,
+        user_home_port,
+        alerts_port,
+    ));
+
+    let resumable_pair = decommission_repo.latest_incomplete_pair().await;
+    log_resumable(resumable_pair);
+    let resumable_drain_id = resumable_pair.map(|(src, dst)| make_drain_id(src, dst));
 
     // ── 4. Spawn background tasks ─────────────────────────────────────────────
     Arc::clone(&hot_path).spawn_background();
@@ -147,6 +188,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!(addr = %addr, "treasury gRPC server starting");
 
     let svc = TreasuryServer {
+        cfg: Arc::clone(&cfg),
+        http: http.clone(),
         pool,
         hot_path,
         account_balance,
@@ -156,6 +199,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         watcher,
         relayer_key_loaded,
         rpc_reachable,
+        decommission_repo,
+        decommission_orchestrator,
+        holder_index_runtime,
+        chain_state_runtime,
+        bank_drain_runtime,
+        drain_runtime: Arc::new(tokio::sync::Mutex::new(DrainRuntimeState {
+            running_drain_id: None,
+            resumable_drain_id,
+        })),
     };
 
     Server::builder()
