@@ -21,7 +21,25 @@ The 7-day grace period begins when both transactions are confirmed. During the g
 
 ## Step 2: Run And Monitor Drain
 
-Treasury starts the decommission orchestrator for the source chain and selected target chain. The orchestrator:
+Start the drain with Treasury's admin RPC (token-gated via `DECOMMISSION_ADMIN_TOKEN`):
+
+```bash
+grpcurl -plaintext \
+  -H "x-decommission-admin-token: ${DECOMMISSION_ADMIN_TOKEN}" \
+  -d '{"source_chain":84532,"target_chain":421614}' \
+  localhost:50051 treasury.TreasuryService/StartDecommissionDrain
+```
+
+Poll status with the returned `drain_id` (format: `source-target`, example `84532-421614`):
+
+```bash
+grpcurl -plaintext \
+  -H "x-decommission-admin-token: ${DECOMMISSION_ADMIN_TOKEN}" \
+  -d '{"drain_id":"84532-421614"}' \
+  localhost:50051 treasury.TreasuryService/GetDecommissionDrainStatus
+```
+
+The orchestrator:
 
 1. Enumerates SyncUSD holders from Treasury's indexed transfer/deposit history.
 2. Cross-checks every holder balance with on-chain `balanceOf`.
@@ -32,6 +50,8 @@ Treasury starts the decommission orchestrator for the source chain and selected 
 7. Drains the USDC reserve with `bridgeReserve`.
 
 If the target chain becomes inactive during the drain, Treasury pauses and alerts operators. Governance decides whether to wait for target recovery or start a separate migration plan.
+
+If Treasury is redeployed or restarted mid-drain, run `StartDecommissionDrain` again with the same source/target pair to resume from `treasury.decommission_ops` progress.
 
 ## Drain Progress Dashboard
 

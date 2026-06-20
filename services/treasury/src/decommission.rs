@@ -294,6 +294,38 @@ mod tests {
         }
 
         async fn mark_op_failed(&self, _op_id: &OperationId, _failure_reason: &str) {}
+
+        async fn has_incomplete_ops(&self) -> bool {
+            false
+        }
+
+        async fn latest_incomplete_pair(&self) -> Option<(ChainId, ChainId)> {
+            None
+        }
+
+        async fn status_counts(
+            &self,
+            _source_chain: ChainId,
+            _target_chain: ChainId,
+        ) -> Vec<(String, u64)> {
+            Vec::new()
+        }
+
+        async fn drained_amount_wei(
+            &self,
+            _source_chain: ChainId,
+            _target_chain: ChainId,
+        ) -> String {
+            "0".to_string()
+        }
+
+        async fn last_error(
+            &self,
+            _source_chain: ChainId,
+            _target_chain: ChainId,
+        ) -> Option<String> {
+            None
+        }
     }
 
     struct StaticChainState(bool);

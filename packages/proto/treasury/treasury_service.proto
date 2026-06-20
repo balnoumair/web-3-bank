@@ -21,6 +21,8 @@ service TreasuryService {
   // RouteReceiver-derived activation set (same view the hot-path relayer uses).
   rpc IsChainActive(IsChainActiveRequest) returns (IsChainActiveResponse);
   rpc IsChainDecommissioned(IsChainDecommissionedRequest) returns (IsChainDecommissionedResponse);
+  rpc StartDecommissionDrain(StartDecommissionDrainRequest) returns (StartDecommissionDrainResponse);
+  rpc GetDecommissionDrainStatus(GetDecommissionDrainStatusRequest) returns (GetDecommissionDrainStatusResponse);
 }
 
 message HealthCheckRequest {}
@@ -100,4 +102,30 @@ message IsChainDecommissionedRequest {
 }
 message IsChainDecommissionedResponse {
   bool decommissioned = 1;
+}
+
+message StartDecommissionDrainRequest {
+  uint64 source_chain = 1;
+  uint64 target_chain = 2;
+}
+
+message StartDecommissionDrainResponse {
+  string drain_id = 1;
+}
+
+message GetDecommissionDrainStatusRequest {
+  string drain_id = 1;
+}
+
+message DecommissionStatusCount {
+  string status = 1;
+  uint64 count = 2;
+}
+
+message GetDecommissionDrainStatusResponse {
+  string drain_id = 1;
+  string state = 2; // running | paused | resumable | completed
+  repeated DecommissionStatusCount status_counts = 3;
+  string drained_amount_wei = 4;
+  string last_error = 5;
 }
