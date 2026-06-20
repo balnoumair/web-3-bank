@@ -378,6 +378,7 @@ pub async fn check_rpc_reachable(
 }
 
 impl TreasuryServer {
+    #[allow(clippy::result_large_err)]
     fn check_decommission_admin<T>(&self, req: &Request<T>) -> Result<(), Status> {
         let expected = self.cfg.decommission_admin_token.as_ref().ok_or_else(|| {
             Status::failed_precondition("DECOMMISSION_ADMIN_TOKEN is not configured")
