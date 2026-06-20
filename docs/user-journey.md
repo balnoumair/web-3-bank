@@ -275,14 +275,25 @@ CRE Orchestrator              RouteReceiver.sol          Treasury Service
     │                              │                          ├─ Any hot path to Arbitrum
     │                              │                          │  → REJECTED
     │                              │                          │
-    │                              │                          │  If a user on Arbitrum
-    │                              │                          │  wants to withdraw:
-    │                              │                          ├─ Treasury fulfills from
-    │                              │                          │  Tempo or Base pool
-    │                              │                          │  instead
+    │                              │                          │  If Bob holds SyncUSD on
+    │                              │                          │  Arbitrum and wants to
+    │                              │                          │  withdraw:
+    │                              │                          ├─ Treasury reports that
+    │                              │                          │  balance as temporarily
+    │                              │                          │  unavailable (chain inactive)
+    │                              │                          ├─ No custodial fulfillment
+    │                              │                          │  from another chain's pool
+    │                              │                          ├─ If Bob also holds balance
+    │                              │                          │  on Tempo or Base, the client
+    │                              │                          │  withdraws there instead
+    │                              │                          ├─ Funds on the dead chain
+    │                              │                          │  become withdrawable when the
+    │                              │                          │  chain recovers or after a
+    │                              │                          │  decommission drain relocates
+    │                              │                          │  them to a healthy chain
 ```
 
-**What users see:** Nothing. The bank works. Deposits go to Tempo or Base. Withdrawals are served from healthy pools. Nobody even knows Arbitrum is down.
+**What users see:** Deposits and sends route around the dead chain automatically. Withdrawals work for whatever portion of their balance sits on chains that can still process transactions. Any balance stuck on the inactive chain is shown as **temporarily unavailable** — honest, not hidden — until recovery or decommission.
 
 ---
 

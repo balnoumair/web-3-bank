@@ -7,6 +7,7 @@ import type {
   ITreasuryService,
   PoolDepth,
   Transfer,
+  WithdrawalRoutingEntry,
 } from "../../domain/ports/treasury-service.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -36,6 +37,14 @@ type ActivityEntryProto = {
   status: string;
   txHash: string;
   occurredAt: string;
+};
+
+type WithdrawalRoutingEntryProto = {
+  chainId: string;
+  withdrawableWei: string;
+  available: boolean;
+  reason: string;
+  balanceWei: string;
 };
 
 /** gRPC adapter for the treasury-service — implements the ITreasuryService driven port. */
@@ -122,6 +131,30 @@ export class GrpcTreasuryServiceAdapter implements ITreasuryService {
         (err: grpc.ServiceError | null, res: { decommissioned: boolean }) => {
           if (err) reject(grpcToError(err));
           else resolve(res.decommissioned);
+        },
+      );
+    });
+  }
+
+  getWithdrawalRouting(address: string): Promise<WithdrawalRoutingEntry[]> {
+    return new Promise((resolve, reject) => {
+      this.client.getWithdrawalRouting(
+        { address },
+        (
+          err: grpc.ServiceError | null,
+          res: { entries: WithdrawalRoutingEntryProto[] },
+        ) => {
+          if (err) reject(grpcToError(err));
+          else
+            resolve(
+              (res.entries ?? []).map((e) => ({
+                chainId: String(e.chainId),
+                withdrawableWei: e.withdrawableWei,
+                available: e.available,
+                reason: e.reason ?? "",
+                balanceWei: e.balanceWei,
+              })),
+            );
         },
       );
     });

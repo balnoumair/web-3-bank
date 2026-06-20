@@ -209,6 +209,16 @@ pub async fn fetch_pool_depth(
     fetch_u256_view(http, rpc_url, bank_addr, selector).await
 }
 
+/// Live Bank Contract `reserveDepth()` via `eth_call`.
+pub async fn fetch_reserve_depth(
+    http: &reqwest::Client,
+    rpc_url: &str,
+    bank_addr: &str,
+    selector: &[u8; 4],
+) -> Option<U256> {
+    fetch_u256_view(http, rpc_url, bank_addr, selector).await
+}
+
 pub async fn fetch_max_rebalance_amount(
     http: &reqwest::Client,
     rpc_url: &str,

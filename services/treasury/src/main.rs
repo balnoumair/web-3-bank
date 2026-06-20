@@ -13,6 +13,7 @@ mod pool_manager;
 mod reserve_path;
 mod server;
 mod watcher;
+mod withdrawal_routing;
 
 /// Generated user-service gRPC client (for `SetUserHomeChain`).
 pub mod user_pb {
@@ -35,6 +36,7 @@ use tracing::info;
 
 use crate::account_activity::AccountActivityService;
 use crate::account_balance::AccountBalanceService;
+use crate::withdrawal_routing::WithdrawalRoutingService;
 use crate::account_index::AccountIndexer;
 use crate::cold_path::ColdPath;
 use crate::config::Config;
@@ -112,6 +114,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Arc::clone(&account_event_repo),
         Arc::clone(&hot_path),
     );
+    let withdrawal_routing = WithdrawalRoutingService::new(
+        Arc::clone(&cfg),
+        http.clone(),
+        Arc::clone(&account_event_repo),
+        Arc::clone(&hot_path),
+    );
     let account_activity = AccountActivityService::new(
         Arc::clone(&account_event_repo),
         Arc::clone(&relay_repo),
@@ -147,6 +155,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         account_activity,
         pool_manager,
         watcher,
+        withdrawal_routing,
         relayer_key_loaded,
         rpc_reachable,
     };

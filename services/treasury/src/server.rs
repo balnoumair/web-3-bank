@@ -12,14 +12,16 @@ use tracing::info;
 
 use crate::account_activity::AccountActivityService;
 use crate::account_balance::AccountBalanceService;
+use crate::withdrawal_routing::WithdrawalRoutingService;
 use crate::hot_path::HotPath;
 use crate::pool_manager::PoolManager;
 use crate::proto::treasury::{
     health_check_response, treasury_service_server::TreasuryService, GetAccountActivityRequest,
     GetAccountActivityResponse, GetBalanceRequest, GetBalanceResponse, GetPoolDepthRequest,
     GetPoolDepthResponse, GetRelayStatusRequest, GetRelayStatusResponse, GetWatcherAlertsRequest,
-    GetWatcherAlertsResponse, HealthCheckRequest, HealthCheckResponse, IsChainActiveRequest,
-    IsChainActiveResponse, IsChainDecommissionedRequest, IsChainDecommissionedResponse,
+    GetWatcherAlertsResponse, GetWithdrawalRoutingRequest, GetWithdrawalRoutingResponse,
+    HealthCheckRequest, HealthCheckResponse, IsChainActiveRequest, IsChainActiveResponse,
+    IsChainDecommissionedRequest, IsChainDecommissionedResponse,
 };
 use crate::watcher::Watcher;
 
@@ -30,6 +32,7 @@ pub struct TreasuryServer {
     pub account_activity: Arc<AccountActivityService>,
     pub pool_manager: Arc<PoolManager>,
     pub watcher: Arc<Watcher>,
+    pub withdrawal_routing: Arc<WithdrawalRoutingService>,
     /// Cached result of the startup relayer-key check.
     pub relayer_key_loaded: bool,
     /// Cached result of the startup RPC reachability check.
@@ -118,6 +121,13 @@ impl TreasuryService for TreasuryServer {
         Ok(Response::new(IsChainDecommissionedResponse {
             decommissioned,
         }))
+    }
+
+    async fn get_withdrawal_routing(
+        &self,
+        req: Request<GetWithdrawalRoutingRequest>,
+    ) -> Result<Response<GetWithdrawalRoutingResponse>, Status> {
+        self.withdrawal_routing.get_withdrawal_routing(req).await
     }
 }
 

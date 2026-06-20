@@ -1,13 +1,16 @@
-import { createSignal, Show, type Component } from 'solid-js';
+import { createSignal, createResource, Show, type Component } from 'solid-js';
 import { parseAmount, formatUsd } from '~/lib/format';
 import { showToast } from './Toast';
 import { gql } from '~/lib/graphql';
 import { env } from '~/config/env';
+import { sumUnavailableBalanceWei } from '~/lib/withdrawal-routing';
 import {
   RESOLVE_USERNAME_QUERY,
   RESOLVE_RECIPIENT_ROUTING_QUERY,
+  WITHDRAWAL_ROUTING_QUERY,
   type ResolveUsernameResponse,
   type ResolveRecipientRoutingResponse,
+  type WithdrawalRoutingResponse,
 } from '~/queries/auth';
 
 export type TransactionType = 'deposit' | 'withdraw' | 'send';
@@ -48,6 +51,21 @@ const TransactionModal: Component<TransactionModalProps> = (props) => {
   const [error, setError] = createSignal<string | null>(null);
 
   const needsRecipient = () => props.type === 'send';
+  const isWithdraw = () => props.type === 'withdraw';
+
+  const [withdrawalRouting] = createResource(
+    () => (props.isOpen && isWithdraw() ? true : null),
+    async () => {
+      const data = await gql<WithdrawalRoutingResponse>(WITHDRAWAL_ROUTING_QUERY);
+      return data.withdrawalRouting;
+    },
+  );
+
+  const unavailableBalanceWei = () => {
+    const entries = withdrawalRouting();
+    if (!entries) return 0n;
+    return sumUnavailableBalanceWei(entries);
+  };
 
   const handleSubmit = async (e: Event) => {
     e.preventDefault();
@@ -168,6 +186,17 @@ const TransactionModal: Component<TransactionModalProps> = (props) => {
                 />
               </div>
             </div>
+
+            {/* Temporarily unavailable balance (withdraw only) */}
+            <Show when={isWithdraw() && unavailableBalanceWei() > 0n}>
+              <div class="bg-info/10 border border-info/20 rounded-lg p-3">
+                <p class="text-info text-sm">
+                  {formatUsd(unavailableBalanceWei())} temporarily unavailable — held on a chain
+                  that cannot process withdrawals right now. Funds are safe and will become
+                  withdrawable when the chain recovers or is decommissioned.
+                </p>
+              </div>
+            </Show>
 
             {/* Recipient */}
             <Show when={needsRecipient()}>

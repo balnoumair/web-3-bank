@@ -108,3 +108,25 @@ export const RESOLVE_RECIPIENT_ROUTING_QUERY = `
 export interface ResolveRecipientRoutingResponse {
   resolveRecipientRouting: { tempoAddress: string; destChainId: string };
 }
+
+export const WITHDRAWAL_ROUTING_QUERY = `
+  query WithdrawalRouting {
+    withdrawalRouting {
+      chainId
+      withdrawableWei
+      available
+      reason
+      balanceWei
+    }
+  }
+`;
+
+export interface WithdrawalRoutingResponse {
+  withdrawalRouting: Array<{
+    chainId: string;
+    withdrawableWei: string;
+    available: boolean;
+    reason: string;
+    balanceWei: string;
+  }>;
+}

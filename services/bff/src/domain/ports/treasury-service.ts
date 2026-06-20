@@ -19,6 +19,14 @@ export type Transfer = {
   direction?: string | null;
 };
 
+export type WithdrawalRoutingEntry = {
+  chainId: string;
+  withdrawableWei: string;
+  available: boolean;
+  reason: string;
+  balanceWei: string;
+};
+
 /** Driven port — implemented by the gRPC treasury-service adapter. */
 export interface ITreasuryService {
   getBalance(address: string): Promise<BalanceResult>;
@@ -28,4 +36,6 @@ export interface ITreasuryService {
   isChainActive(chainId: number): Promise<boolean>;
   /** Governance-finalized terminal chain state. */
   isChainDecommissioned(chainId: number): Promise<boolean>;
+  /** Per-chain withdrawability for withdrawal failover. */
+  getWithdrawalRouting(address: string): Promise<WithdrawalRoutingEntry[]>;
 }

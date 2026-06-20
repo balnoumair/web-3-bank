@@ -20,6 +20,9 @@ service TreasuryService {
   // RouteReceiver-derived activation set (same view the hot-path relayer uses).
   rpc IsChainActive(IsChainActiveRequest) returns (IsChainActiveResponse);
   rpc IsChainDecommissioned(IsChainDecommissionedRequest) returns (IsChainDecommissionedResponse);
+
+  // Per-chain withdrawability: min(balanceOf, reserveDepth) on active chains.
+  rpc GetWithdrawalRouting(GetWithdrawalRoutingRequest) returns (GetWithdrawalRoutingResponse);
 }
 
 message HealthCheckRequest {}
@@ -83,4 +86,22 @@ message IsChainDecommissionedRequest {
 }
 message IsChainDecommissionedResponse {
   bool decommissioned = 1;
+}
+
+message GetWithdrawalRoutingRequest {
+  string address = 1;
+}
+
+message WithdrawalRoutingEntry {
+  uint64 chain_id        = 1;
+  string withdrawable_wei = 2;
+  bool   available       = 3;
+  // Empty when available; e.g. "chain_inactive" when the chain cannot process txs.
+  string reason          = 4;
+  // User SyncUSD balance on this chain (before reserve cap).
+  string balance_wei     = 5;
+}
+
+message GetWithdrawalRoutingResponse {
+  repeated WithdrawalRoutingEntry entries = 1;
 }
