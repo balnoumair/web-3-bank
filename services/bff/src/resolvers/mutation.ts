@@ -13,43 +13,104 @@ function requireAuth(ctx: Context) {
 
 export function makeMutationResolvers(mutations: MutationUseCases) {
   return {
+    requestChallenge: () => mutations.requestChallenge(),
+
     registerUser: async (
       _: unknown,
       args: {
+        attestation: {
+          credentialId: string;
+          clientDataJSON: string;
+          attestationObject: string;
+        };
         address: string;
-        credentialId: string;
         publicKey: string;
         displayName?: string | null;
         chainId?: number | null;
-      }
+      },
     ) => {
-      return mutations.registerUser(args);
+      try {
+        return await mutations.registerUser(args);
+      } catch (err) {
+        throw authGraphqlError(err);
+      }
     },
 
     addCredential: async (
       _: unknown,
-      args: { credentialId: string; publicKey: string },
-      ctx: Context
+      args: {
+        newCredential: {
+          credentialId: string;
+          clientDataJSON: string;
+          attestationObject: string;
+        };
+        assertion: {
+          credentialId: string;
+          authenticatorData: string;
+          clientDataJSON: string;
+          signature: string;
+        };
+        publicKey: string;
+      },
+      ctx: Context,
     ) => {
-      // userId is injected from the JWT — never trusted from the client
-      const { userId, address } = requireAuth(ctx);
-      return mutations.addCredential({ ...args, userId, address });
+      const { userId, address, credentialId } = requireAuth(ctx);
+      try {
+        return await mutations.addCredential({
+          ...args,
+          userId,
+          address,
+          sessionCredentialId: credentialId,
+        });
+      } catch (err) {
+        throw authGraphqlError(err);
+      }
     },
 
     authenticate: async (
       _: unknown,
-      args: { credentialId: string; chainId?: number | null }
+      args: {
+        assertion: {
+          credentialId: string;
+          authenticatorData: string;
+          clientDataJSON: string;
+          signature: string;
+        };
+        chainId?: number | null;
+      },
     ) => {
-      return mutations.authenticate(args);
+      try {
+        return await mutations.authenticate(args);
+      } catch (err) {
+        throw authGraphqlError(err);
+      }
+    },
+
+    authenticateLegacy: async (
+      _: unknown,
+      args: { credentialId: string; chainId?: number | null },
+    ) => {
+      try {
+        return await mutations.authenticateLegacy(args);
+      } catch (err) {
+        throw authGraphqlError(err);
+      }
     },
 
     setUsername: async (
       _: unknown,
       args: { username: string },
-      ctx: Context
+      ctx: Context,
     ) => {
       const { userId } = requireAuth(ctx);
       return mutations.setUsername({ userId, username: args.username });
     },
   };
+}
+
+function authGraphqlError(err: unknown): GraphQLError {
+  const message = err instanceof Error ? err.message : "Authentication failed";
+  return new GraphQLError(message, {
+    extensions: { code: "UNAUTHENTICATED" },
+  });
 }

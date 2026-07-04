@@ -57,6 +57,23 @@ export const typeDefs = /* GraphQL */ `
     userId: String!
   }
 
+  type AuthChallenge {
+    challenge: String!
+  }
+
+  input WebAuthnAssertionInput {
+    credentialId: String!
+    authenticatorData: String!
+    clientDataJSON: String!
+    signature: String!
+  }
+
+  input WebAuthnAttestationInput {
+    credentialId: String!
+    clientDataJSON: String!
+    attestationObject: String!
+  }
+
   type Query {
     """Returns current user profile from JWT session (requires auth)"""
     me: User!
@@ -78,27 +95,39 @@ export const typeDefs = /* GraphQL */ `
 
     """Per-chain withdrawal routing for the authenticated user (requires auth)"""
     withdrawalRouting: [WithdrawalRoutingEntry!]!
+
+    """Passkeys registered to the authenticated account (requires auth)"""
+    credentials: [Credential!]!
   }
 
   type Mutation {
-    """Register a new user with a passkey credential, returns a JWT session"""
+    """Issue a single-use WebAuthn challenge (anonymous)"""
+    requestChallenge: AuthChallenge!
+
+    """Register a new user with a verified passkey attestation"""
     registerUser(
+      attestation: WebAuthnAttestationInput!
       address: String!
-      credentialId: String!
       publicKey: String!
       displayName: String
       chainId: Int
     ): AuthPayload!
 
-    """Add a new passkey credential to the current user's account (requires auth)"""
-    addCredential(credentialId: String!, publicKey: String!): String!
+    """Add a new passkey credential (requires auth + fresh assertion)"""
+    addCredential(
+      newCredential: WebAuthnAttestationInput!
+      assertion: WebAuthnAssertionInput!
+      publicKey: String!
+    ): String!
 
-    """
-    Authenticate an existing user.
-    The frontend must have already verified the passkey challenge before calling this.
-    Returns a JWT session token.
-    """
-    authenticate(credentialId: String!, chainId: Int): AuthPayload!
+    """Authenticate with a verified WebAuthn assertion"""
+    authenticate(
+      assertion: WebAuthnAssertionInput!
+      chainId: Int
+    ): AuthPayload!
+
+    """Dev-only legacy login by credentialId (requires BFF_DEV_MODE=1)"""
+    authenticateLegacy(credentialId: String!, chainId: Int): AuthPayload!
 
     """Set or update the authenticated user's username (requires auth)"""
     setUsername(username: String!): User!

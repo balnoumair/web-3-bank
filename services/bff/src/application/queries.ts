@@ -81,6 +81,8 @@ export function makeQueryUseCases(
     getWithdrawalRouting: (address: string): Promise<WithdrawalRoutingEntry[]> =>
       treasuryService.getWithdrawalRouting(address),
 
+    listCredentials: (userId: string) => userService.listCredentials(userId),
+
     resolveUsername: async (
       username: string,
       senderChainId: number,

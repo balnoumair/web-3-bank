@@ -6,7 +6,7 @@
 use async_trait::async_trait;
 use uuid::Uuid;
 
-use crate::domain::entities::{Credential, User, UserWithCredential};
+use crate::domain::entities::{Credential, CredentialAuthLookup, User, UserWithCredential};
 use crate::domain::errors::DomainError;
 use crate::domain::validation::{TempoAddress, Username};
 
@@ -67,11 +67,11 @@ pub trait CredentialRepository: Send + Sync {
         tempo_address: &TempoAddress,
     ) -> Result<Option<UserWithCredential>, DomainError>;
 
-    /// Look up a user by their WebAuthn credential ID (raw bytes).
+    /// Look up a user by their WebAuthn credential ID (raw bytes), including public key.
     async fn get_user_by_credential_id(
         &self,
         credential_id: &[u8],
-    ) -> Result<Option<UserWithCredential>, DomainError>;
+    ) -> Result<Option<CredentialAuthLookup>, DomainError>;
 
     /// List credentials for a user. When `active_only` is true, excludes
     /// revoked credentials.

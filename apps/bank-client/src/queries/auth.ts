@@ -11,6 +11,10 @@ export interface AuthPayload {
   userId: string;
 }
 
+export interface AuthChallenge {
+  challenge: string;
+}
+
 export const ME_QUERY = `
   query Me {
     me {
@@ -27,17 +31,29 @@ export interface MeResponse {
   me: User;
 }
 
+export const REQUEST_CHALLENGE_MUTATION = `
+  mutation RequestChallenge {
+    requestChallenge {
+      challenge
+    }
+  }
+`;
+
+export interface RequestChallengeResponse {
+  requestChallenge: AuthChallenge;
+}
+
 export const REGISTER_USER_MUTATION = `
   mutation RegisterUser(
+    $attestation: WebAuthnAttestationInput!
     $address: String!
-    $credentialId: String!
     $publicKey: String!
     $displayName: String
     $chainId: Int
   ) {
     registerUser(
+      attestation: $attestation
       address: $address
-      credentialId: $credentialId
       publicKey: $publicKey
       displayName: $displayName
       chainId: $chainId
@@ -53,8 +69,8 @@ export interface RegisterUserResponse {
 }
 
 export const AUTHENTICATE_MUTATION = `
-  mutation Authenticate($credentialId: String!, $chainId: Int) {
-    authenticate(credentialId: $credentialId, chainId: $chainId) {
+  mutation Authenticate($assertion: WebAuthnAssertionInput!, $chainId: Int) {
+    authenticate(assertion: $assertion, chainId: $chainId) {
       token
       userId
     }
@@ -63,6 +79,46 @@ export const AUTHENTICATE_MUTATION = `
 
 export interface AuthenticateResponse {
   authenticate: AuthPayload;
+}
+
+export interface Credential {
+  credentialId: string;
+  tempoAddress: string;
+  createdAt: string;
+  revoked: boolean;
+}
+
+export const CREDENTIALS_QUERY = `
+  query Credentials {
+    credentials {
+      credentialId
+      tempoAddress
+      createdAt
+      revoked
+    }
+  }
+`;
+
+export interface CredentialsResponse {
+  credentials: Credential[];
+}
+
+export const ADD_CREDENTIAL_MUTATION = `
+  mutation AddCredential(
+    $newCredential: WebAuthnAttestationInput!
+    $assertion: WebAuthnAssertionInput!
+    $publicKey: String!
+  ) {
+    addCredential(
+      newCredential: $newCredential
+      assertion: $assertion
+      publicKey: $publicKey
+    )
+  }
+`;
+
+export interface AddCredentialResponse {
+  addCredential: string;
 }
 
 export const SET_USERNAME_MUTATION = `

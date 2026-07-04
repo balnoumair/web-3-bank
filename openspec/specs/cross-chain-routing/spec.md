@@ -225,3 +225,88 @@ Before a withdrawal transaction is constructed, the client SHALL obtain withdraw
 - **WHEN** Bob's balance on an active chain exceeds that chain's current reserve depth
 - **THEN** the routing response SHALL report the withdrawable amount capped at the reserve depth for that chain
 
+### Requirement: Decommissioned chains are never used as source or destination
+
+The Treasury Service and BFF SHALL treat any chain in `decommissioned` state as terminal. No hot-path transfer, no cold-path rebalance, no reserve bridge SHALL target a decommissioned chain as source or destination. Existing inflight operations targeting a chain that becomes decommissioned mid-flight SHALL be allowed to complete if the destination is the dying chain itself **only** if the operation is part of the drain procedure.
+
+#### Scenario: BFF rejects a transfer to a decommissioned home chain
+
+- **WHEN** a sender initiates a transfer to a recipient whose `home_chain` is decommissioned
+- **THEN** the BFF SHALL fall back to same-chain delivery (sender's chain)
+- **AND** SHALL NOT update `home_chain` (only the decommission orchestrator may change it)
+
+### Requirement: Treasury executes the chain drain procedure
+
+When a chain is marked for decommissioning, the Treasury Service SHALL execute a drain procedure that, in order:
+
+1. Enumerates SyncUSD holders on the dying chain via its event index.
+2. For each holder, bridges the holder's SyncUSD to a governance-chosen target healthy chain via CCIP burn-and-mint, and updates the holder's `home_chain` via the User Service.
+3. Drains the SyncUSD pool via `rebalance` to the target chain.
+4. Drains the USDC reserve via `bridgeReserve` to the target chain.
+5. Records every step in `treasury.decommission_ops` keyed on per-step `messageId` or correlation id.
+
+The drain procedure SHALL be resumable: restart MUST skip already-completed holder bridges based on the audit table.
+
+#### Scenario: Treasury resumes after a partial holder drain
+
+- **WHEN** the decommission orchestrator restarts after one holder bridge is recorded as completed
+- **THEN** Treasury SHALL skip the completed holder
+- **AND** Treasury SHALL continue draining remaining holders before pool and reserve drain steps
+
+### Requirement: Drain respects activation gate of the target chain
+
+If the drain target chain becomes `inactive` during a drain, Treasury SHALL pause the drain and alert operators. The drain SHALL NOT proceed against an inactive target.
+
+#### Scenario: Target chain becomes inactive during drain
+
+- **WHEN** Treasury detects the selected drain target chain is inactive
+- **THEN** Treasury SHALL pause the drain before submitting additional bridge operations
+- **AND** Treasury SHALL alert operators for manual governance review
+
+### Requirement: Drain is started by an authenticated operator call
+
+The Treasury Service SHALL expose an admin-only `StartDecommissionDrain(source_chain, target_chain)` entry point gated by an operator token. Before starting, Treasury SHALL validate that the source chain is frozen and marked draining in RouteReceiver, that the target chain is active, and that Treasury holds the required Bank roles on the source chain. The call SHALL be idempotent with respect to resumption: re-invocation for a partially completed drain SHALL resume from the audit table rather than restart.
+
+#### Scenario: Operator starts a drain on a frozen chain
+
+- **WHEN** an operator with a valid token calls `StartDecommissionDrain` for a frozen, draining source chain and an active target chain
+- **THEN** Treasury SHALL build the drain plan and execute the drain in the background, returning a drain identifier
+
+#### Scenario: Trigger rejected when preconditions fail
+
+- **WHEN** the source chain is not frozen, the target chain is not active, or the token is missing or invalid
+- **THEN** Treasury SHALL reject the call without submitting any transaction
+
+#### Scenario: Only one drain at a time
+
+- **WHEN** `StartDecommissionDrain` is called while another drain is running
+- **THEN** Treasury SHALL reject the call
+
+### Requirement: Holder enumeration is grounded in the account event index and cross-checked on-chain
+
+The drain plan's holder set SHALL be enumerated from Treasury's persistent account event index for the source chain, and every holder's amount SHALL be cross-checked against on-chain `balanceOf` before bridging. Treasury SHALL refuse to build a drain plan while the source chain's index cursor lags the chain head beyond a configured tolerance. After all holder bridges complete, Treasury SHALL verify that the remaining non-pool SyncUSD supply on the source chain is zero (within dust tolerance) before draining pool and reserve; on violation it SHALL pause and alert operators.
+
+#### Scenario: Stale index blocks the drain
+
+- **WHEN** the account event index for the source chain is behind the chain head beyond tolerance
+- **THEN** `StartDecommissionDrain` SHALL be rejected until the index catches up
+
+#### Scenario: Index over-enumeration is harmless
+
+- **WHEN** the index proposes a holder whose live on-chain balance is zero
+- **THEN** the orchestrator SHALL skip the holder without submitting a bridge
+
+#### Scenario: Residual supply halts the drain
+
+- **WHEN** holder bridging completes but non-pool SyncUSD supply on the source chain remains above dust tolerance
+- **THEN** Treasury SHALL pause before pool and reserve drain and alert operators
+
+### Requirement: Drain progress is observable
+
+The Treasury Service SHALL expose a status query aggregating `treasury.decommission_ops` for a drain: per-status operation counts, drained amounts, and the most recent error. The status SHALL distinguish running, paused (target inactive or invariant violation), resumable (interrupted), and completed states.
+
+#### Scenario: Operator monitors a running drain
+
+- **WHEN** an operator queries drain status during execution
+- **THEN** Treasury SHALL return per-status counts and amounts consistent with the audit table
+

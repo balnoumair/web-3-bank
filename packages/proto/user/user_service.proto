@@ -44,6 +44,8 @@ message GetUserByCredentialIdResponse {
   string status        = 3;
   string tempo_address = 4;
   string username      = 5;  // empty string if not set
+  bytes  public_key    = 6;  // raw P-256 public key bytes for BFF assertion verification
+  bool   revoked       = 7;  // true when credential is revoked (lookup still returns row for auditing)
 }
 
 message ListCredentialsRequest {

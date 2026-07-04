@@ -6,6 +6,9 @@ import { makeQueryUseCases } from "./application/queries.js";
 import { makeMutationUseCases } from "./application/mutations.js";
 import { GrpcUserServiceAdapter } from "./infrastructure/grpc/user-service.adapter.js";
 import { GrpcTreasuryServiceAdapter } from "./infrastructure/grpc/treasury-service.adapter.js";
+import { assertBffConfig } from "./config.js";
+
+assertBffConfig();
 
 // ── Composition root ──────────────────────────────────────────────────────────
 // Adapters (infrastructure)

@@ -139,6 +139,16 @@ const BankLayout: Component<BankLayoutProps> = (props) => {
                         <div class="fixed inset-0 z-40" onClick={() => setShowDropdown(false)} />
                         <div class="absolute right-0 top-full mt-1 w-44 bg-surface border border-edge rounded-lg z-50 overflow-hidden"
                           style={{ "box-shadow": "var(--shadow-float)" }}>
+                          <a
+                            href="/settings/devices"
+                            onClick={() => setShowDropdown(false)}
+                            class="w-full text-left px-4 py-2.5 text-sm text-muted hover:text-text hover:bg-raised transition-colors flex items-center gap-2"
+                          >
+                            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
+                              <path stroke-linecap="round" stroke-linejoin="round" d="M12 11c1.657 0 3-1.343 3-3S13.657 5 12 5 9 6.343 9 8s1.343 3 3 3zm0 0c-3.866 0-7 1.79-7 4v2h14v-2c0-2.21-3.134-4-7-4z" />
+                            </svg>
+                            Passkeys
+                          </a>
                           <button
                             onClick={handleLogout}
                             class="w-full text-left px-4 py-2.5 text-sm text-muted hover:text-text hover:bg-raised transition-colors flex items-center gap-2"

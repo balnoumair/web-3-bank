@@ -101,3 +101,31 @@ The User Service SHALL expose `GetUserHomeChain(address)` returning the stored `
 
 - **WHEN** a caller requests `GetUserHomeChain` for an address without a matching user profile
 - **THEN** the User Service SHALL return a `not_found` indication
+
+### Requirement: Decommission is the only path that mutates home_chain after creation
+
+The User Service SHALL expose an admin-only `SetUserHomeChain(address, chain_id)` gRPC method, restricted to the Treasury Service's decommission orchestrator (authenticated via service identity). Every call SHALL be recorded in an audit log.
+
+This is the only mutation path for `home_chain` after first-deposit creation. Regular user actions, BFF flows, and CRE chain-health changes SHALL NOT modify `home_chain`.
+
+#### Scenario: Decommission orchestrator reassigns home_chain
+
+- **WHEN** the Treasury Service drains a holder during chain decommissioning
+- **AND** the holder's `home_chain` was the decommissioned chain
+- **THEN** the Treasury Service SHALL call `SetUserHomeChain(holder_address, target_chain_id)`
+- **AND** the User Service SHALL update the record and append an audit entry
+
+### Requirement: Stored public keys are available for assertion verification
+
+The User Service SHALL return the stored P-256 public key as part of credential lookup, so the BFF can verify WebAuthn assertions server-side. Public keys are not secrets; revoked credentials SHALL be excluded from verification lookups.
+
+#### Scenario: BFF verifies a login assertion
+
+- **WHEN** the BFF looks up a credential by credential ID during login
+- **THEN** the User Service SHALL include the stored public key for that credential in the response
+
+#### Scenario: Revoked credential cannot authenticate
+
+- **WHEN** the BFF looks up a credential that has been revoked
+- **THEN** the User Service SHALL indicate the credential is not usable for authentication
+- **AND** the BFF SHALL NOT issue a session for it
