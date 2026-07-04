@@ -156,6 +156,8 @@ impl UserService for UserServiceImpl {
             status: row.status.to_string(),
             tempo_address: row.tempo_address.to_string(),
             username: row.username.map(|u| u.0).unwrap_or_default(),
+            public_key: row.public_key,
+            revoked: row.revoked,
         }))
     }
 
@@ -910,5 +912,80 @@ mod tests {
             .unwrap()
             .into_inner();
         assert!(!res.found);
+    }
+
+    #[sqlx::test]
+    async fn test_get_user_by_credential_id_returns_public_key(pool: PgPool) {
+        let addr = start_test_server(pool).await;
+        let pk = b"stored-public-key".to_vec();
+        let cred_id = b"login-credential-id".to_vec();
+        client(&addr)
+            .await
+            .create_user(CreateUserRequest {
+                display_name: Some("Login User".to_string()),
+                credential_id: cred_id.clone(),
+                public_key: pk.clone(),
+                tempo_address: "0x1234567890abcdef1234567890abcdef12345678".to_string(),
+            })
+            .await
+            .unwrap();
+
+        let resp = client(&addr)
+            .await
+            .get_user_by_credential_id(GetUserByCredentialIdRequest {
+                credential_id: cred_id,
+            })
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert_eq!(resp.public_key, pk);
+        assert!(!resp.revoked);
+    }
+
+    #[sqlx::test]
+    async fn test_get_user_by_credential_id_revoked(pool: PgPool) {
+        let addr = start_test_server(pool).await;
+        let cred_id = b"revoked-cred".to_vec();
+        let created = client(&addr)
+            .await
+            .create_user(CreateUserRequest {
+                display_name: None,
+                credential_id: cred_id.clone(),
+                public_key: b"pk1".to_vec(),
+                tempo_address: "0xaaaa111111111111111111111111111111111111".to_string(),
+            })
+            .await
+            .unwrap()
+            .into_inner();
+        client(&addr)
+            .await
+            .add_credential(AddCredentialRequest {
+                user_id: created.user_id.clone(),
+                credential_id: b"backup-cred".to_vec(),
+                public_key: b"pk2".to_vec(),
+                tempo_address: "0xbbbb222222222222222222222222222222222222".to_string(),
+            })
+            .await
+            .unwrap();
+        client(&addr)
+            .await
+            .revoke_credential(RevokeCredentialRequest {
+                user_id: created.user_id,
+                credential_id: cred_id.clone(),
+            })
+            .await
+            .unwrap();
+
+        let resp = client(&addr)
+            .await
+            .get_user_by_credential_id(GetUserByCredentialIdRequest {
+                credential_id: cred_id,
+            })
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert!(resp.revoked);
     }
 }

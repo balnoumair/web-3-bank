@@ -1,8 +1,13 @@
 import { createSignal, onMount } from 'solid-js';
-import { createPasskeyCredential, getPasskeyCredential } from '~/lib/passkey';
-import { deriveTempoAddress } from '~/lib/address';
+import {
+  createPasskeyCredential,
+  getPasskeyCredential,
+  webAuthnFieldToBase64url,
+} from '~/lib/passkey';
+import { deriveTempoAddress, bufferToBase64url } from '~/lib/address';
 import { gql, setAuthToken, getAuthToken } from '~/lib/graphql';
 import { queryClient } from '~/contexts/query-context';
+import { requestServerChallenge } from '~/lib/auth-challenge';
 import {
   ME_QUERY,
   REGISTER_USER_MUTATION,
@@ -19,7 +24,6 @@ export function createAuth() {
   const [isLoading, setIsLoading] = createSignal(true);
   const [error, setError] = createSignal<string | null>(null);
 
-  // Restore session on mount
   onMount(async () => {
     const token = getAuthToken();
     if (token) {
@@ -37,30 +41,24 @@ export function createAuth() {
     setIsLoading(true);
     setError(null);
     try {
-      // 1. Create passkey (triggers biometric)
-      const credential = await createPasskeyCredential(displayName);
-
-      // 2. Derive Tempo address from P-256 public key
+      const challenge = await requestServerChallenge();
+      const credential = await createPasskeyCredential(displayName, challenge);
       const address = deriveTempoAddress(credential.publicKey);
 
-      // 3. Encode public key as hex for BFF
-      const publicKeyHex = Array.from(credential.publicKey)
-        .map((b) => b.toString(16).padStart(2, '0'))
-        .join('');
-
-      // 4. Register with BFF
       const data = await gql<RegisterUserResponse>(REGISTER_USER_MUTATION, {
+        attestation: {
+          credentialId: credential.credentialId,
+          clientDataJSON: webAuthnFieldToBase64url(credential.clientDataJSON),
+          attestationObject: webAuthnFieldToBase64url(credential.attestationObject),
+        },
         address,
-        credentialId: credential.credentialId,
-        publicKey: publicKeyHex,
+        publicKey: bufferToBase64url(credential.publicKey),
         displayName,
         chainId: env.tempoChainId,
       });
 
-      // 5. Store JWT
       setAuthToken(data.registerUser.token);
 
-      // 6. Fetch full user profile
       const meData = await gql<MeResponse>(ME_QUERY);
       setUser(meData.me);
     } catch (err) {
@@ -76,19 +74,21 @@ export function createAuth() {
     setIsLoading(true);
     setError(null);
     try {
-      // 1. Get existing passkey (triggers biometric)
-      const assertion = await getPasskeyCredential();
+      const challenge = await requestServerChallenge();
+      const assertion = await getPasskeyCredential(challenge);
 
-      // 2. Authenticate — the BFF looks up the user by credentialId
       const data = await gql<AuthenticateResponse>(AUTHENTICATE_MUTATION, {
-        credentialId: assertion.credentialId,
+        assertion: {
+          credentialId: assertion.credentialId,
+          authenticatorData: webAuthnFieldToBase64url(assertion.authenticatorData),
+          clientDataJSON: webAuthnFieldToBase64url(assertion.clientDataJSON),
+          signature: webAuthnFieldToBase64url(assertion.signature),
+        },
         chainId: env.tempoChainId,
       });
 
-      // 3. Store JWT
       setAuthToken(data.authenticate.token);
 
-      // 4. Fetch full user profile
       const meData = await gql<MeResponse>(ME_QUERY);
       setUser(meData.me);
     } catch (err) {

@@ -34,6 +34,19 @@ const Sidebar: Component = () => {
           </svg>
           Dashboard
         </a>
+        <a
+          href="/settings/devices"
+          class={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all ${
+            isActive('/settings/devices')
+              ? 'bg-accent/10 text-accent'
+              : 'text-muted hover:text-text hover:bg-raised'
+          }`}
+        >
+          <svg class="w-[18px] h-[18px]" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M12 11c1.657 0 3-1.343 3-3S13.657 5 12 5 9 6.343 9 8s1.343 3 3 3zm0 0c-3.866 0-7 1.79-7 4v2h14v-2c0-2.21-3.134-4-7-4z" />
+          </svg>
+          Passkeys
+        </a>
       </nav>
     </div>
   );

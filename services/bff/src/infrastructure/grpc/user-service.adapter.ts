@@ -5,6 +5,8 @@ import { dirname, resolve } from "node:path";
 import type {
   IUserService,
   UserRecord,
+  CredentialAuthRecord,
+  CredentialRecord,
   CreateUserInput,
   AddCredentialInput,
   HomeChainResult,
@@ -61,14 +63,23 @@ export class GrpcUserServiceAdapter implements IUserService {
     });
   }
 
-  getUserByCredentialId(credentialId: Buffer): Promise<UserRecord> {
+  getUserByCredentialId(credentialId: Buffer): Promise<CredentialAuthRecord> {
     return new Promise((resolve, reject) => {
       this.client.getUserByCredentialId(
         { credentialId },
-        (err: grpc.ServiceError | null, res: UserRecord) => {
+        (
+          err: grpc.ServiceError | null,
+          res: UserRecord & { publicKey: Buffer; revoked: boolean },
+        ) => {
           if (err) reject(grpcToError(err));
-          else resolve(res);
-        }
+          else {
+            resolve({
+              ...res,
+              publicKey: Buffer.from(res.publicKey),
+              revoked: Boolean(res.revoked),
+            });
+          }
+        },
       );
     });
   }
@@ -115,7 +126,7 @@ export class GrpcUserServiceAdapter implements IUserService {
         { tempoAddress },
         (
           err: grpc.ServiceError | null,
-          res: { found: boolean; chainId: string | number }
+          res: { found: boolean; chainId: string | number },
         ) => {
           if (err) reject(grpcToError(err));
           else if (res.found) {
@@ -123,7 +134,22 @@ export class GrpcUserServiceAdapter implements IUserService {
           } else {
             resolve({ found: false });
           }
-        }
+        },
+      );
+    });
+  }
+
+  listCredentials(userId: string): Promise<CredentialRecord[]> {
+    return new Promise((resolve, reject) => {
+      this.client.listCredentials(
+        { userId },
+        (
+          err: grpc.ServiceError | null,
+          res: { credentials: CredentialRecord[] },
+        ) => {
+          if (err) reject(grpcToError(err));
+          else resolve(res.credentials ?? []);
+        },
       );
     });
   }

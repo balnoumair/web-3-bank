@@ -1,7 +1,11 @@
+import { base64urlToBuffer, bufferToBase64url } from '@repo/tempo-crypto';
+
 export interface PasskeyCredentialResult {
   credentialId: string;
   publicKey: Uint8Array;
   rawId: ArrayBuffer;
+  clientDataJSON: ArrayBuffer;
+  attestationObject: ArrayBuffer;
 }
 
 export interface PasskeyAssertionResult {
@@ -12,23 +16,18 @@ export interface PasskeyAssertionResult {
   signature: ArrayBuffer;
 }
 
-function bufferToBase64url(buffer: ArrayBuffer): string {
-  const bytes = new Uint8Array(buffer);
-  let binary = '';
-  for (const byte of bytes) {
-    binary += String.fromCharCode(byte);
-  }
-  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+function bufferToBase64urlFromArrayBuffer(buffer: ArrayBuffer): string {
+  return bufferToBase64url(new Uint8Array(buffer));
 }
 
 /**
- * Create a new passkey credential (registration).
- * Calls navigator.credentials.create() with P-256 algorithm for Tempo compatibility.
+ * Create a new passkey credential (registration) using a BFF-issued challenge.
  */
 export async function createPasskeyCredential(
   displayName: string,
+  challengeB64url: string,
 ): Promise<PasskeyCredentialResult> {
-  const challenge = crypto.getRandomValues(new Uint8Array(32));
+  const challenge = base64urlToBuffer(challengeB64url);
 
   const credential = (await navigator.credentials.create({
     publicKey: {
@@ -42,9 +41,7 @@ export async function createPasskeyCredential(
         name: displayName,
         displayName,
       },
-      pubKeyCredParams: [
-        { alg: -7, type: 'public-key' }, // ES256 (P-256)
-      ],
+      pubKeyCredParams: [{ alg: -7, type: 'public-key' }],
       authenticatorSelection: {
         authenticatorAttachment: 'platform',
         residentKey: 'required',
@@ -63,18 +60,21 @@ export async function createPasskeyCredential(
   const publicKey = new Uint8Array(response.getPublicKey()!);
 
   return {
-    credentialId: bufferToBase64url(credential.rawId),
+    credentialId: bufferToBase64urlFromArrayBuffer(credential.rawId),
     publicKey,
     rawId: credential.rawId,
+    clientDataJSON: response.clientDataJSON,
+    attestationObject: response.attestationObject,
   };
 }
 
 /**
- * Get an existing passkey credential (login).
- * Calls navigator.credentials.get() to trigger biometric verification.
+ * Get an existing passkey credential (login) using a BFF-issued challenge.
  */
-export async function getPasskeyCredential(): Promise<PasskeyAssertionResult> {
-  const challenge = crypto.getRandomValues(new Uint8Array(32));
+export async function getPasskeyCredential(
+  challengeB64url: string,
+): Promise<PasskeyAssertionResult> {
+  const challenge = base64urlToBuffer(challengeB64url);
 
   const assertion = (await navigator.credentials.get({
     publicKey: {
@@ -92,7 +92,7 @@ export async function getPasskeyCredential(): Promise<PasskeyAssertionResult> {
   const response = assertion.response as AuthenticatorAssertionResponse;
 
   return {
-    credentialId: bufferToBase64url(assertion.rawId),
+    credentialId: bufferToBase64urlFromArrayBuffer(assertion.rawId),
     rawId: assertion.rawId,
     authenticatorData: response.authenticatorData,
     clientDataJSON: response.clientDataJSON,
@@ -123,10 +123,12 @@ export async function signWithPasskey(
   const response = assertion.response as AuthenticatorAssertionResponse;
 
   return {
-    credentialId: bufferToBase64url(assertion.rawId),
+    credentialId: bufferToBase64urlFromArrayBuffer(assertion.rawId),
     rawId: assertion.rawId,
     authenticatorData: response.authenticatorData,
     clientDataJSON: response.clientDataJSON,
     signature: response.signature,
   };
 }
+
+export { bufferToBase64urlFromArrayBuffer as webAuthnFieldToBase64url };

@@ -10,7 +10,7 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use super::sqlx_to_domain;
-use crate::domain::entities::{Credential, UserStatus, UserWithCredential};
+use crate::domain::entities::{Credential, CredentialAuthLookup, UserStatus, UserWithCredential};
 use crate::domain::errors::DomainError;
 use crate::domain::repository::CredentialRepository;
 use crate::domain::validation::{TempoAddress, Username};
@@ -59,6 +59,31 @@ impl From<UserWithCredentialRow> for UserWithCredential {
             status: row.status.parse().unwrap_or(UserStatus::Active),
             created_at: row.created_at,
             tempo_address: TempoAddress(row.tempo_address), // DB data assumed valid
+        }
+    }
+}
+
+#[derive(Debug, sqlx::FromRow)]
+struct CredentialAuthLookupRow {
+    user_id: Uuid,
+    display_name: String,
+    username: Option<String>,
+    status: String,
+    tempo_address: String,
+    public_key: Vec<u8>,
+    revoked: bool,
+}
+
+impl From<CredentialAuthLookupRow> for CredentialAuthLookup {
+    fn from(row: CredentialAuthLookupRow) -> Self {
+        CredentialAuthLookup {
+            user_id: row.user_id,
+            display_name: row.display_name,
+            username: row.username.map(Username),
+            status: row.status.parse().unwrap_or(UserStatus::Active),
+            tempo_address: TempoAddress(row.tempo_address),
+            public_key: row.public_key,
+            revoked: row.revoked,
         }
     }
 }
@@ -117,19 +142,19 @@ impl CredentialRepository for PgCredentialRepository {
     async fn get_user_by_credential_id(
         &self,
         credential_id: &[u8],
-    ) -> Result<Option<UserWithCredential>, DomainError> {
-        let row = sqlx::query_as!(
-            UserWithCredentialRow,
-            "SELECT u.id AS user_id, u.display_name, u.username, u.status, u.created_at, c.tempo_address
+    ) -> Result<Option<CredentialAuthLookup>, DomainError> {
+        let row = sqlx::query_as::<_, CredentialAuthLookupRow>(
+            "SELECT u.id AS user_id, u.display_name, u.username, u.status, c.tempo_address,
+                    c.public_key, (c.revoked_at IS NOT NULL) AS revoked
              FROM users.credentials c
              JOIN users.users u ON u.id = c.user_id
-             WHERE c.credential_id = $1 AND c.revoked_at IS NULL",
-            credential_id,
+             WHERE c.credential_id = $1",
         )
+        .bind(credential_id)
         .fetch_optional(&self.pool)
         .await
         .map_err(sqlx_to_domain)?;
-        Ok(row.map(UserWithCredential::from))
+        Ok(row.map(CredentialAuthLookup::from))
     }
 
     async fn get_user_by_username(
@@ -418,5 +443,67 @@ mod tests {
             .await
             .unwrap();
         assert!(result.is_none());
+    }
+
+    #[sqlx::test]
+    async fn test_get_user_by_credential_id_returns_public_key(pool: PgPool) {
+        let user_repo = PgUserRepository::new(pool.clone());
+        let cred_repo = PgCredentialRepository::new(pool);
+
+        let user_id = user_repo.insert(Some("Bob")).await.unwrap();
+        let pk = b"p256-public-key-bytes".to_vec();
+        cred_repo
+            .insert(
+                user_id,
+                b"cred-login",
+                &pk,
+                &addr("0xdddd444444444444444444444444444444444444"),
+            )
+            .await
+            .unwrap();
+
+        let row = cred_repo
+            .get_user_by_credential_id(b"cred-login")
+            .await
+            .unwrap()
+            .expect("credential lookup should succeed");
+
+        assert_eq!(row.public_key, pk);
+        assert!(!row.revoked);
+    }
+
+    #[sqlx::test]
+    async fn test_get_user_by_credential_id_flags_revoked(pool: PgPool) {
+        let user_repo = PgUserRepository::new(pool.clone());
+        let cred_repo = PgCredentialRepository::new(pool);
+
+        let user_id = user_repo.insert(None).await.unwrap();
+        cred_repo
+            .insert(
+                user_id,
+                b"cred-revoked",
+                b"pk",
+                &addr("0xeeee555555555555555555555555555555555555"),
+            )
+            .await
+            .unwrap();
+        cred_repo
+            .insert(
+                user_id,
+                b"cred-active",
+                b"pk2",
+                &addr("0xffff666666666666666666666666666666666666"),
+            )
+            .await
+            .unwrap();
+        cred_repo.revoke(user_id, b"cred-revoked").await.unwrap();
+
+        let row = cred_repo
+            .get_user_by_credential_id(b"cred-revoked")
+            .await
+            .unwrap()
+            .expect("revoked credential row should still be returned");
+
+        assert!(row.revoked);
     }
 }

@@ -62,5 +62,10 @@ export function makeQueryResolvers(queries: QueryUseCases) {
       const { address } = requireAuth(ctx);
       return queries.getWithdrawalRouting(address);
     },
+
+    credentials: async (_: unknown, __: unknown, ctx: Context) => {
+      const { userId } = requireAuth(ctx);
+      return queries.listCredentials(userId);
+    },
   };
 }

@@ -8,11 +8,13 @@
     "start": "bun run src/index.ts",
     "build": "bun build src/index.ts --outdir dist --target bun",
     "check-types": "tsc --noEmit",
-    "test": "bun test src/domain/send-routing.test.ts"
+    "test": "bun test src/domain/send-routing.test.ts src/application/auth-mutations.test.ts src/challenge-store.test.ts"
   },
   "dependencies": {
     "@grpc/grpc-js": "^1.12.6",
     "@grpc/proto-loader": "^0.7.15",
+    "@repo/tempo-crypto": "workspace:*",
+    "@simplewebauthn/server": "^13.3.2",
     "graphql": "^16.10.0",
     "graphql-yoga": "^5.10.4",
     "jsonwebtoken": "^9.0.2"

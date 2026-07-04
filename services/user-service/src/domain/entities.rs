@@ -128,6 +128,18 @@ impl Credential {
     }
 }
 
+/// Lookup result for passkey authentication — includes the stored public key.
+#[derive(Debug, Clone)]
+pub struct CredentialAuthLookup {
+    pub user_id: Uuid,
+    pub display_name: String,
+    pub username: Option<Username>,
+    pub status: UserStatus,
+    pub tempo_address: TempoAddress,
+    pub public_key: Vec<u8>,
+    pub revoked: bool,
+}
+
 /// A projection joining user and credential data, used for
 /// address-based user lookups.
 #[derive(Debug, Clone)]

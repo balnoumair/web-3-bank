@@ -8,6 +8,18 @@ export type UserRecord = {
   destChainId?: string | null;
 };
 
+export type CredentialAuthRecord = UserRecord & {
+  publicKey: Buffer;
+  revoked: boolean;
+};
+
+export type CredentialRecord = {
+  credentialId: string;
+  tempoAddress: string;
+  createdAt: string;
+  revoked: boolean;
+};
+
 export type CreateUserInput = {
   displayName?: string;
   credentialId: Buffer;
@@ -30,9 +42,10 @@ export type HomeChainResult =
 export interface IUserService {
   createUser(input: CreateUserInput): Promise<{ userId: string }>;
   getUserByAddress(tempoAddress: string): Promise<UserRecord>;
-  getUserByCredentialId(credentialId: Buffer): Promise<UserRecord>;
+  getUserByCredentialId(credentialId: Buffer): Promise<CredentialAuthRecord>;
   addCredential(input: AddCredentialInput): Promise<{ credentialId: string }>;
   setUsername(userId: string, username: string): Promise<UserRecord>;
   getUserByUsername(username: string): Promise<UserRecord>;
   getUserHomeChain(tempoAddress: string): Promise<HomeChainResult>;
+  listCredentials(userId: string): Promise<CredentialRecord[]>;
 }

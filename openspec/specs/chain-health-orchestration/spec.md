@@ -79,3 +79,27 @@ The CRE Orchestrator SHALL NOT call the Treasury Service directly, and the Treas
 - **WHEN** the CRE Orchestrator deactivates a chain
 - **THEN** the Treasury Service SHALL learn of it only by reading `RouteReceiver.sol`
 - **AND** no direct request SHALL flow between the two services in either direction
+
+### Requirement: Three chain states distinguished in RouteReceiver
+
+`RouteReceiver.sol` SHALL distinguish three chain states: `active`, `inactive`, and `decommissioned`.
+
+- `active` and `inactive` are set by the CRE Orchestrator based on real-time scoring (existing behavior).
+- `decommissioned` is set only by governance via two admin functions: `markDecommissioning(chainId)` (intent / drain in progress) and `finalizeDecommission(chainId)` (terminal).
+- Once a chain is `decommissioned`, it SHALL NOT transition back to any other state.
+
+#### Scenario: CRE attempts to mark a decommissioned chain active
+
+- **WHEN** the CRE Orchestrator publishes activation state for a chain that is already `decommissioned`
+- **THEN** RouteReceiver SHALL reject the update for that chain
+- **AND** the decommissioned status SHALL remain unchanged
+
+### Requirement: CRE excludes decommissioned chains from scoring
+
+The CRE Orchestrator SHALL skip decommissioned chains entirely. It SHALL NOT fetch metrics for them, SHALL NOT include them in published activation state, and SHALL NOT produce scores for them.
+
+#### Scenario: Decommissioned chain is omitted from activation output
+
+- **WHEN** CRE is given a chain list that includes a `decommissioned` chain
+- **THEN** CRE SHALL omit that chain from scoring
+- **AND** CRE SHALL NOT include that chain in either the active or inactive published activation sets
