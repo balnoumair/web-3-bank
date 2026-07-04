@@ -16,7 +16,10 @@ describe("deriveTempoAddress", () => {
 
   it("matches keccak256(x || y) last 20 bytes", () => {
     const key = makeSPKIKey(x, y);
-    const expected = `0x${keccak256(new Uint8Array([...x, ...y]) as `0x${string}`).slice(-40)}`;
+    const coordinates = new Uint8Array(64);
+    coordinates.set(x, 0);
+    coordinates.set(y, 32);
+    const expected = `0x${keccak256(coordinates).slice(-40)}`;
     expect(deriveTempoAddress(key)).toBe(expected);
   });
 });
